@@ -1,0 +1,9 @@
+{
+  "titolo": "Fattura CLIENTE_A #A-2026-001",
+  "cliente": "Mario Rossi Spa",
+  "data": "14/07/2026",
+  "righe": [
+    { "descrizione": "Consulenza dedicata", "quantita": 2, "prezzo": "€600.00" }
+  ],
+  "totale": "1.200,00"
+}

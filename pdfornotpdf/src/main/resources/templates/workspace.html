@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="it" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDForNotPDF — Workspace</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, monospace; background: #1e1e2e; color: #cdd6f4; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+        /* Toolbar */
+        .toolbar { display: flex; gap: 8px; padding: 8px 12px; background: #181825; border-bottom: 1px solid #313244; flex-shrink: 0; align-items: center; }
+        .toolbar .brand { font-weight: 700; color: #cba6f7; font-size: 14px; }
+        .toolbar .ws-name { font-size: 12px; color: #6c7086; }
+        .toolbar .spacer { flex: 1; }
+        .toolbar button { padding: 6px 14px; border-radius: 6px; border: 1px solid #45475a; background: #313244; color: #cdd6f4; font-size: 13px; cursor: pointer; transition: 0.15s; }
+        .toolbar button:hover { background: #45475a; border-color: #585b70; }
+        .toolbar button.primary { background: #cba6f7; color: #1e1e2e; border-color: #cba6f7; font-weight: 600; }
+        .toolbar button.primary:hover { background: #b4befe; }
+        .toolbar button.on { background: #cba6f7; color: #1e1e2e; border-color: #cba6f7; font-weight: 600; }
+        .toolbar button.on:hover { background: #b4befe; }
+        #status-msg { font-size: 12px; color: #a6e3a1; opacity: 0; transition: opacity 0.4s; }
+        #status-msg.visible { opacity: 1; }
+
+        /* Workbench: explorer + editor */
+        .workbench { flex: 1; display: flex; overflow: hidden; }
+
+        /* Explorer */
+        .explorer { width: 230px; min-width: 160px; max-width: 420px; background: #181825; border-right: 1px solid #313244; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; }
+        .explorer-header { padding: 10px 14px 6px; font-size: 11px; font-weight: 700; color: #a6adc8; text-transform: uppercase; letter-spacing: 0.8px; flex-shrink: 0; }
+        .explorer-tree { flex: 1; overflow: auto; padding-bottom: 12px; }
+        .explorer-tree summary { list-style: none; display: flex; align-items: center; gap: 2px; padding: 3px 8px; font-size: 13px; color: #cdd6f4; cursor: pointer; user-select: none; white-space: nowrap; }
+        .explorer-tree summary::-webkit-details-marker { display: none; }
+        .explorer-tree summary::before { content: '▸'; display: inline-block; width: 12px; color: #6c7086; transition: transform 0.1s; flex-shrink: 0; }
+        .explorer-tree details[open] > summary::before { content: '▾'; }
+        .explorer-tree summary:hover { background: #313244; }
+        .tree-file { display: flex; align-items: center; gap: 6px; padding: 3px 8px; padding-right: 14px; font-size: 13px; color: #cdd6f4; cursor: pointer; white-space: nowrap; }
+        .tree-file:hover { background: #313244; }
+        .tree-file.active { background: #45475a; color: #cba6f7; }
+        .tree-file .dirty-dot { margin-left: auto; color: #cba6f7; font-size: 10px; }
+        .tree-empty { padding: 12px 14px; font-size: 12px; color: #6c7086; }
+
+        /* Sidebar resize handle */
+        .sidebar-handle { width: 4px; cursor: col-resize; background: #313244; flex-shrink: 0; transition: background 0.15s; z-index: 10; }
+        .sidebar-handle:hover, .sidebar-handle.active { background: #cba6f7; }
+
+        /* Editor area */
+        .editor-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #1e1e2e; }
+
+        /* Tab bar */
+        .tabbar { display: flex; background: #181825; border-bottom: 1px solid #313244; overflow-x: auto; flex-shrink: 0; min-height: 35px; scrollbar-width: thin; }
+        .tab { display: flex; align-items: center; gap: 7px; padding: 8px 10px 8px 14px; font-size: 13px; color: #a6adc8; border-right: 1px solid #313244; cursor: pointer; white-space: nowrap; user-select: none; }
+        .tab:hover { background: #313244; }
+        .tab.active { background: #1e1e2e; color: #cdd6f4; box-shadow: inset 0 2px 0 #cba6f7; }
+        .tab .dirty-dot { color: #cba6f7; font-size: 11px; visibility: hidden; }
+        .tab .dirty-dot.on { visibility: visible; }
+        .tab .tab-close { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 4px; font-size: 14px; line-height: 1; color: #6c7086; }
+        .tab .tab-close:hover { background: #45475a; color: #cdd6f4; }
+
+        /* Editor */
+        .editor-host { flex: 1; position: relative; overflow: hidden; }
+        .editor-cm { height: 100%; }
+        .editor-cm .cm-editor { height: 100%; }
+        .editor-empty { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 10px; align-items: center; justify-content: center; color: #6c7086; font-size: 14px; }
+        .editor-empty .kinds { font-size: 12px; letter-spacing: 0.5px; }
+    </style>
+    <script src="/js/editor.js"></script>
+</head>
+<body>
+    <div class="toolbar">
+        <span class="brand">PDForNotPDF</span>
+        <span class="ws-name" id="ws-name"></span>
+        <span class="spacer"></span>
+        <span id="status-msg"></span>
+        <button id="paged-toggle" class="on" onclick="togglePaged()" title="Paginazione Paged.js attiva — clicca per disattivarla">📄 Paged</button>
+        <button onclick="popoutPreview()" title="Apri l'anteprima in una finestra separata del browser (sempre sincronizzata)">👁️ Popout</button>
+        <button onclick="saveActive()" title="Salva il file del tab attivo (Ctrl/Cmd+S)">💾 Salva</button>
+        <button class="primary" onclick="printPdf()" title="Genera il PDF del template attivo nello stato corrente">🖨️ Stampa PDF</button>
+    </div>
+
+    <div class="workbench">
+        <!-- Explorer -->
+        <aside class="explorer" id="explorer">
+            <div class="explorer-header">Explorer</div>
+            <div class="explorer-tree" id="explorer-tree">
+                <div class="tree-empty">Caricamento…</div>
+            </div>
+        </aside>
+        <div class="sidebar-handle" id="sidebar-handle"></div>
+
+        <!-- Editor area -->
+        <main class="editor-area">
+            <div class="tabbar" id="tabbar"></div>
+            <div class="editor-host" id="editor-host">
+                <div class="editor-empty" id="editor-empty">
+                    <span>Nessun file aperto</span>
+                    <span class="kinds">Apri un file dall'Explorer: 📄 HTML · 🎨 CSS · 📊 JSON</span>
+                </div>
+                <div class="editor-cm" id="editor" style="display:none"></div>
+            </div>
+        </main>
+    </div>
+
+    <script th:inline="javascript">
+        /*<![CDATA[*/
+        const workspacePath = /*[[${session.workspacePath}]]*/ '';
+        document.getElementById('ws-name').textContent = '— ' + workspacePath.split('/').filter(Boolean).pop();
+
+        const editorHost = document.getElementById('editor');
+        const emptyEl = document.getElementById('editor-empty');
+        const KIND_ICON = { html: '📄', css: '🎨', json: '📊', img: '🖼️' };
+        const EDITABLE_KINDS = ['html', 'css', 'json'];
+
+        // ====== STATE ======
+        let pagedEnabled = true;
+        let popoutWin = null;
+        let lastPreviewDoc = null;
+        let lastPreviewInfo = null;
+        let previewDirty = true;
+        let previewSeq = 0;               // contatore per scartare risposte di preview fuori ordine
+        let view = null;                  // EditorView CM6 (uno, con stato per tab)
+
+        let treeRoot = null;
+        const fileKinds = new Map();      // relPath -> 'html' | 'css' | 'json'
+        const openTabs = [];              // relPath[] nell'ordine dei tab
+        const tabStates = new Map();      // relPath -> EditorState (doc, selection, history)
+        const tabScroll = new Map();      // relPath -> scrollTop
+        let activeTab = null;
+        let lastActiveTemplate = null;
+        const buffers = new Map();        // relPath -> contenuto corrente (solo tab aperti)
+        const savedContents = new Map();  // relPath -> contenuto su disco
+        const collapsedDirs = new Set();
+
+        // ====== HELPERS ======
+        function basename(p) { return p.split('/').pop(); }
+        function swapExt(p, ext) { return p.replace(/\.[a-z0-9]+$/i, '') + ext; }
+        function kindOfPath(p) {
+            const k = fileKinds.get(p);
+            if (k) return k;
+            const m = p.match(/\.([a-z0-9]+)$/i);
+            return m ? m[1].toLowerCase() : '';
+        }
+        function isModified(path) {
+            return buffers.has(path) && buffers.get(path) !== savedContents.get(path);
+        }
+        function flushActive() {
+            if (activeTab && view) buffers.set(activeTab, view.state.doc.toString());
+        }
+        function dirtyFilesMap() {
+            flushActive();
+            const map = {};
+            for (const p of openTabs) if (isModified(p)) map[p] = buffers.get(p);
+            return map;
+        }
+        async function apiGet(url) {
+            const resp = await fetch(url, { credentials: 'same-origin' });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            return await resp.text();
+        }
+        async function loadFile(path) {
+            return await apiGet('/workspace/file?workspace=' + encodeURIComponent(workspacePath) + '&file=' + encodeURIComponent(path));
+        }
+
+        // ====== EDITOR (CodeMirror 6) ======
+        function initEditor() {
+            if (!window.CM6) {
+                emptyEl.innerHTML = '<span>⚠️ Bundle editor non disponibile (/js/editor.js)</span>';
+                return false;
+            }
+            view = new CM6.EditorView({ parent: editorHost, state: CM6.makeState('html', '', cmHandlers()) });
+            return true;
+        }
+
+        function cmHandlers() {
+            return {
+                onChange: () => {
+                    if (activeTab) buffers.set(activeTab, view.state.doc.toString());
+                    autoPreview();
+                    renderTabs();
+                },
+                onSave: () => saveActive(),
+            };
+        }
+
+        // ====== EXPLORER ======
+        async function loadTree() {
+            try {
+                const resp = await fetch('/workspace/tree?workspace=' + encodeURIComponent(workspacePath), { credentials: 'same-origin' });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                treeRoot = await resp.json();
+                indexKinds(treeRoot);
+                renderTree();
+            } catch (e) {
+                document.getElementById('explorer-tree').innerHTML = '<div class="tree-empty">Errore caricamento albero file</div>';
+                console.error('Tree load failed:', e);
+            }
+        }
+
+        function indexKinds(node) {
+            if (node.type === 'dir') { (node.children || []).forEach(indexKinds); }
+            else fileKinds.set(node.path, node.kind);
+        }
+
+        function renderTree() {
+            const host = document.getElementById('explorer-tree');
+            host.innerHTML = '';
+            if (!treeRoot || !(treeRoot.children || []).length) {
+                host.innerHTML = '<div class="tree-empty">Nessun file supportato nel workspace</div>';
+                return;
+            }
+            host.appendChild(buildTreeChildren(treeRoot.children, 0));
+        }
+
+        function buildTreeChildren(nodes, depth) {
+            const frag = document.createDocumentFragment();
+            for (const node of nodes) {
+                if (node.type === 'dir') {
+                    const details = document.createElement('details');
+                    details.open = !collapsedDirs.has(node.path);
+                    details.addEventListener('toggle', () => {
+                        if (details.open) collapsedDirs.delete(node.path); else collapsedDirs.add(node.path);
+                    });
+                    const summary = document.createElement('summary');
+                    summary.textContent = node.name;
+                    summary.style.paddingLeft = (8 + depth * 14) + 'px';
+                    details.appendChild(summary);
+                    details.appendChild(buildTreeChildren(node.children || [], depth + 1));
+                    frag.appendChild(details);
+                } else {
+                    const row = document.createElement('div');
+                    row.className = 'tree-file' + (node.path === activeTab ? ' active' : '');
+                    row.style.paddingLeft = (14 + depth * 14) + 'px';
+                    row.title = node.path;
+                    const icon = document.createElement('span');
+                    icon.textContent = KIND_ICON[node.kind] || '📄';
+                    row.appendChild(icon);
+                    row.appendChild(document.createTextNode(node.name));
+                    if (openTabs.includes(node.path) && isModified(node.path)) {
+                        const dot = document.createElement('span');
+                        dot.className = 'dirty-dot';
+                        dot.textContent = '●';
+                        row.appendChild(dot);
+                    }
+                    if (node.kind === 'img') {
+                        row.style.cursor = 'default';
+                        row.title = node.path + ' (immagine)';
+                    } else {
+                        row.addEventListener('click', () => openFile(node.path));
+                    }
+                    frag.appendChild(row);
+                }
+            }
+            return frag;
+        }
+
+        // ====== TABS ======
+        async function openFile(path) {
+            if (!EDITABLE_KINDS.includes(kindOfPath(path))) {
+                showStatus('🖼️ ' + path + ' (immagine: solo riferimento, non modificabile)');
+                return;
+            }
+            if (!openTabs.includes(path)) {
+                try {
+                    const content = await loadFile(path);
+                    buffers.set(path, content);
+                    savedContents.set(path, content);
+                    tabStates.set(path, CM6.makeState(kindOfPath(path), content, cmHandlers()));
+                    openTabs.push(path);
+                } catch (e) {
+                    console.error('Open failed:', e);
+                    alert('Impossibile aprire ' + path);
+                    return;
+                }
+            }
+            activateTab(path);
+        }
+
+        function activateTab(path) {
+            if (!view) return;
+            if (activeTab && activeTab !== path) {
+                tabStates.set(activeTab, view.state);
+                tabScroll.set(activeTab, view.scrollDOM.scrollTop);
+                buffers.set(activeTab, view.state.doc.toString());
+            }
+            activeTab = path;
+            view.setState(tabStates.get(path));
+            view.scrollDOM.scrollTop = tabScroll.get(path) || 0;
+            emptyEl.style.display = 'none';
+            editorHost.style.display = '';
+            if (kindOfPath(path) === 'html') lastActiveTemplate = path;
+            renderTabs();
+            renderTree();
+            if (popoutWin && !popoutWin.closed) refreshPreview();
+        }
+
+        function closeTab(path, ev) {
+            if (ev) ev.stopPropagation();
+            const idx = openTabs.indexOf(path);
+            if (idx === -1) return;
+            flushActive();
+            if (isModified(path) && !confirm('"' + basename(path) + '" ha modifiche non salvate. Chiudere comunque?')) return;
+            openTabs.splice(idx, 1);
+            buffers.delete(path);
+            savedContents.delete(path);
+            tabStates.delete(path);
+            tabScroll.delete(path);
+            if (activeTab === path) {
+                activeTab = null;
+                const next = openTabs[Math.min(idx, openTabs.length - 1)];
+                if (next) { activateTab(next); } else { showEmpty(); }
+            }
+            if (lastActiveTemplate === path || !openTabs.includes(lastActiveTemplate)) recomputeLastTemplate();
+            renderTabs();
+            renderTree();
+        }
+
+        function recomputeLastTemplate() {
+            lastActiveTemplate = null;
+            for (let i = openTabs.length - 1; i >= 0; i--) {
+                if (kindOfPath(openTabs[i]) === 'html') { lastActiveTemplate = openTabs[i]; break; }
+            }
+        }
+
+        function showEmpty() {
+            activeTab = null;
+            editorHost.style.display = 'none';
+            emptyEl.style.display = 'flex';
+        }
+
+        function renderTabs() {
+            const bar = document.getElementById('tabbar');
+            bar.innerHTML = '';
+            for (const path of openTabs) {
+                const tab = document.createElement('div');
+                tab.className = 'tab' + (path === activeTab ? ' active' : '');
+                tab.title = path;
+                tab.addEventListener('click', () => activateTab(path));
+                tab.addEventListener('auxclick', (e) => { if (e.button === 1) closeTab(path, e); });
+
+                const icon = document.createElement('span');
+                icon.textContent = KIND_ICON[kindOfPath(path)] || '📄';
+                const label = document.createElement('span');
+                label.textContent = basename(path);
+                const dot = document.createElement('span');
+                dot.className = 'dirty-dot' + (isModified(path) ? ' on' : '');
+                dot.textContent = '●';
+                const close = document.createElement('span');
+                close.className = 'tab-close';
+                close.textContent = '×';
+                close.title = 'Chiudi';
+                close.addEventListener('click', (e) => closeTab(path, e));
+
+                tab.append(icon, label, dot, close);
+                bar.appendChild(tab);
+            }
+        }
+
+        // ====== PREVIEW (solo via popout) ======
+        function pickTemplate() {
+            if (activeTab && kindOfPath(activeTab) === 'html') return activeTab;
+            return lastActiveTemplate;
+        }
+
+        async function refreshPreview() {
+            flushActive();
+            const template = pickTemplate();
+            if (!template) { console.log('Nessun template aperto: anteprima non disponibile'); return; }
+
+            const dirtyFiles = dirtyFilesMap();
+            const info = {
+                template,
+                json: fileKinds.has(swapExt(template, '.json')),
+                cssLinks: cssLinkCount(template),
+                live: Object.keys(dirtyFiles).length > 0,
+            };
+
+            const seq = ++previewSeq;
+            try {
+                const resp = await fetch('/workspace/preview', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ workspace: workspacePath, template, dirtyFiles }),
+                });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const html = await resp.text();
+                if (seq !== previewSeq) { console.log('Preview scartata (fuori ordine)'); return; }
+                const doc = buildPreviewDoc(html, info);
+                lastPreviewDoc = doc;
+                lastPreviewInfo = info;
+                previewDirty = false;
+                syncPopout(doc, popoutTitle(info));
+            } catch (e) {
+                console.error('Preview failed:', e);
+            }
+        }
+
+        // Conta i <link rel="stylesheet"> dichiarati nel template (da buffer se aperto, altrimenti dal disco via cache)
+        const cssLinkCache = new Map();
+        function cssLinkCount(template) {
+            const content = openTabs.includes(template) ? buffers.get(template) : cssLinkCache.get(template);
+            if (content == null) return null;
+            return (content.match(/<link\b[^>]*stylesheet/gi) || []).length;
+        }
+
+        function popoutTitle(info) {
+            let t = '👁️ ' + info.template;
+            t += ' · ' + (info.json ? '📊 json ✓' : '📊 json —');
+            if (info.cssLinks != null) t += ' · 🎨 css ×' + info.cssLinks;
+            if (info.live) t += ' (live)';
+            return t;
+        }
+
+        function injectBeforeLast(doc, tag, content) {
+            const idx = doc.toLowerCase().lastIndexOf(tag);
+            if (idx === -1) return null;
+            return doc.slice(0, idx) + content + doc.slice(idx);
+        }
+
+        // Prepara il documento dell'anteprima: Paged.js + badge del trio renderizzato
+        function buildPreviewDoc(rawHtml, info) {
+            const isDocument = /<\/head>/i.test(rawHtml) || /<\/body>/i.test(rawHtml);
+
+            if (!isDocument) {
+                // Messaggio di errore dal server (già HTML-escaped da Thymeleaf)
+                return '<!DOCTYPE html><html><head><title>Errore anteprima</title></head>' +
+                    '<body style="font-family:monospace;padding:16px;background:#1e1e2e;color:#f38ba8;white-space:pre-wrap;">' +
+                    rawHtml + '</body></html>';
+            }
+
+            let doc = rawHtml;
+            if (pagedEnabled) {
+                // Dimensione pagina A4 di default (come OpenHTMLtoPDF) se il CSS non definisce @page
+                const extraCss = [];
+                if (!/@page\s*[{:]/i.test(doc)) extraCss.push('@page { size: A4; }');
+                extraCss.push(
+                    'body { background: #525659; margin: 0; }' +
+                    '.pagedjs_pages { display: flex; flex-direction: column; align-items: center; padding: 12px; gap: 12px; }' +
+                    '.pagedjs_page { background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.4); margin: 0; }'
+                );
+                doc = injectBeforeLast(doc, '</head>', '<style>' + extraCss.join('\n') + '</style>\n') || doc;
+                const pagedScript = '<scr' + 'ipt src="https://unpkg.com/pagedjs/dist/paged.polyfill.js"></scr' + 'ipt>';
+                doc = injectBeforeLast(doc, '</body>', pagedScript + '\n') || doc;
+            }
+            if (info) {
+                const parts = ['📄 ' + info.template];
+                parts.push(info.json ? '📊 json ✓' : '📊 json —');
+                if (info.cssLinks != null) parts.push('🎨 css ×' + info.cssLinks);
+                const live = info.live ? ' · <span style="color:#f9e2af">● live</span>' : '';
+                const badge = '<div style="position:fixed;bottom:10px;right:14px;background:rgba(24,24,37,.9);border:1px solid #45475a;border-radius:6px;padding:4px 10px;font:11px/1.4 monospace;color:#a6adc8;z-index:99999">'
+                    + parts.join(' · ') + live + '</div>';
+                doc = injectBeforeLast(doc, '</body>', badge + '\n') || doc;
+            }
+            return doc;
+        }
+
+        function syncPopout(doc, title) {
+            if (!popoutWin || popoutWin.closed) return;
+            try {
+                popoutWin.document.open();
+                popoutWin.document.write(doc);
+                popoutWin.document.close();
+                if (title) popoutWin.document.title = title;
+            } catch (e) { console.warn('syncPopout ritardata:', e.message); }
+        }
+
+        function togglePaged() {
+            pagedEnabled = !pagedEnabled;
+            const btn = document.getElementById('paged-toggle');
+            btn.classList.toggle('on', pagedEnabled);
+            btn.title = pagedEnabled
+                ? 'Paginazione Paged.js attiva — clicca per disattivarla'
+                : 'Paginazione disattivata — clicca per attivare Paged.js';
+            if (lastPreviewDoc || (popoutWin && !popoutWin.closed)) refreshPreview();
+        }
+
+        function popoutPreview() {
+            if (popoutWin && !popoutWin.closed) { popoutWin.focus(); }
+            else {
+                popoutWin = window.open('', 'pdforNotPdf_preview', 'width=920,height=1080,menubar=no,toolbar=no,location=no,status=no');
+                if (!popoutWin) { alert('Il browser ha bloccato la finestra di anteprima. Consenti i popup per questo sito.'); return; }
+            }
+            if (lastPreviewDoc && !previewDirty && lastPreviewInfo) {
+                syncPopout(lastPreviewDoc, popoutTitle(lastPreviewInfo));
+            } else {
+                refreshPreview();
+            }
+        }
+
+        // ====== SALVATAGGIO ======
+        async function saveActive() {
+            flushActive();
+            if (!activeTab) return;
+            try {
+                const resp = await fetch('/workspace/file', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ workspace: workspacePath, file: activeTab, content: buffers.get(activeTab) }),
+                });
+                if (!resp.ok) { alert('Salvataggio fallito:\n' + await resp.text()); return; }
+                savedContents.set(activeTab, buffers.get(activeTab));
+                renderTabs();
+                renderTree();
+                showStatus('✓ Salvato ' + basename(activeTab));
+                if (popoutWin && !popoutWin.closed) refreshPreview();
+            } catch (e) {
+                alert('Salvataggio fallito: ' + e.message);
+            }
+        }
+
+        let statusTimer;
+        function showStatus(msg) {
+            const el = document.getElementById('status-msg');
+            el.textContent = msg;
+            el.classList.add('visible');
+            clearTimeout(statusTimer);
+            statusTimer = setTimeout(() => el.classList.remove('visible'), 2500);
+        }
+
+        // ====== STAMPA PDF ======
+        async function printPdf() {
+            flushActive();
+            const template = pickTemplate();
+            if (!template) { alert('Apri un template .html prima di stampare.'); return; }
+
+            const dirtyFiles = dirtyFilesMap();
+
+            showStatus('⏳ Generazione PDF…');
+            try {
+                const resp = await fetch('/workspace/print', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ workspace: workspacePath, template, dirtyFiles }),
+                });
+                if (!resp.ok) { alert(await resp.text()); return; }
+                const blob = await resp.blob();
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = template.replace(/\.html$/i, '') + '.pdf';
+                a.click();
+                URL.revokeObjectURL(a.href);
+                showStatus('✓ PDF generato');
+            } catch (e) {
+                alert('Generazione PDF fallita: ' + e.message);
+            }
+        }
+
+        // ====== AUTO-PREVIEW (debounce mentre l'anteprima è aperta) ======
+        let previewTimer;
+        let treeTimer;
+        function autoPreview() {
+            previewDirty = true;
+            clearTimeout(treeTimer);
+            treeTimer = setTimeout(renderTree, 400); // aggiorna i pallini dirty nell'Explorer
+            if (!popoutWin || popoutWin.closed) return;
+            clearTimeout(previewTimer);
+            previewTimer = setTimeout(refreshPreview, 500);
+        }
+        window.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveActive(); }
+        });
+        window.addEventListener('beforeunload', (e) => {
+            flushActive();
+            if (openTabs.some(isModified)) { e.preventDefault(); e.returnValue = ''; }
+        });
+
+        // ====== SIDEBAR RESIZE ======
+        const explorerEl = document.getElementById('explorer');
+        const sbHandle = document.getElementById('sidebar-handle');
+        let draggingSb = false;
+        sbHandle.addEventListener('mousedown', e => {
+            draggingSb = true;
+            sbHandle.classList.add('active');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', e => {
+            if (!draggingSb) return;
+            explorerEl.style.width = Math.max(160, Math.min(420, e.clientX)) + 'px';
+        });
+        document.addEventListener('mouseup', () => {
+            if (!draggingSb) return;
+            draggingSb = false;
+            sbHandle.classList.remove('active');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        });
+
+        // ====== INIT ======
+        if (initEditor()) loadTree();
+        /*]]>*/
+    </script>
+</body>
+</html>

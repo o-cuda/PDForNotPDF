@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8" />
+    <title>Contratto standard</title>
+    <link rel="stylesheet" href="STANDARD/include/common.css" />
+    <link rel="stylesheet" href="STANDARD/include/standard.css" />
+</head>
+<body>
+    <div th:replace="~{STANDARD/include/header :: header}"></div>
+    <h1 th:text="${titolo}">Contratto</h1>
+    <p>Tra <strong th:text="${azienda}">ACME Spa</strong> e <strong th:text="${cliente}">Cliente</strong>.</p>
+    <div th:replace="~{STANDARD/tabella-tariffe :: tariffe}"></div>
+    <p th:text="${clausola}">Clausole contrattuali.</p>
+    <div th:replace="~{STANDARD/include/footer :: footer}"></div>
+</body>
+</html>

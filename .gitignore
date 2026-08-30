@@ -1,0 +1,24 @@
+# Build
+target/
+pdfornotpdf/target/
+
+# Dipendenze JS
+node_modules/
+
+# Output runtime
+*.pdf
+
+# Log
+*.log
+
+# Design process (riservato, non distribuire)
+design-process/
+
+# Architettura (riservata, non distribuire)
+ARCHITECTURE.md
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.iml

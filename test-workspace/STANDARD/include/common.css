@@ -1,0 +1,5 @@
+/* CSS condiviso: usato sia dai template STANDARD sia dai template dei clienti */
+body { font-family: Arial, sans-serif; margin: 40px; color: #333; font-size: 13px; }
+table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+th { padding: 8px; text-align: left; }
+td { padding: 6px 8px; border-bottom: 1px solid #e5e7eb; }

@@ -1,0 +1,2 @@
+<th:block xmlns:th="http://www.thymeleaf.org" th:if="${error}" th:text="${error}"></th:block>
+<th:block xmlns:th="http://www.thymeleaf.org" th:unless="${error}" th:utext="${previewHtml}"></th:block>

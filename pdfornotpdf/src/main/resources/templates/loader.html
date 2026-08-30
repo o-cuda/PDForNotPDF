@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDForNotPDF — Workspace Loader</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1e1e2e; color: #cdd6f4; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .loader-container { background: #313244; border-radius: 12px; padding: 40px; width: 480px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+        h1 { font-size: 22px; margin-bottom: 8px; color: #cba6f7; }
+        p.subtitle { color: #a6adc8; margin-bottom: 24px; font-size: 14px; }
+        label { display: block; margin-bottom: 6px; color: #bac2de; font-size: 13px; }
+        input[type="text"] { width: 100%; padding: 10px 14px; border: 1px solid #45475a; border-radius: 8px; background: #1e1e2e; color: #cdd6f4; font-size: 14px; outline: none; transition: border 0.2s; }
+        input[type="text"]:focus { border-color: #cba6f7; }
+        button { width: 100%; padding: 12px; background: #cba6f7; color: #1e1e2e; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 16px; transition: background 0.2s; }
+        button:hover { background: #b4befe; }
+        .error { background: #f38ba8; color: #1e1e2e; padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; }
+        .hint { margin-top: 16px; font-size: 12px; color: #6c7086; }
+    </style>
+</head>
+<body>
+    <div class="loader-container">
+        <h1>PDForNotPDF</h1>
+        <p class="subtitle">Carica un workspace per iniziare a lavorare sui template PDF</p>
+
+        <div th:if="${error}" class="error" th:text="${error}"></div>
+
+        <form method="post" action="/workspace/load">
+            <label for="path">Percorso directory workspace</label>
+            <input type="text" id="path" name="path" placeholder="/home/utente/progetti/fatture/templates" required autofocus>
+            <button type="submit">Carica workspace</button>
+        </form>
+
+        <p class="hint">La directory deve contenere file .html (template Thymeleaf).<br>CSS e JSON sono opzionali.</p>
+    </div>
+</body>
+</html>
