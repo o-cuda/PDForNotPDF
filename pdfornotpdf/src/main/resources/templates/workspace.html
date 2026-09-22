@@ -29,6 +29,24 @@
         .explorer { width: 230px; min-width: 160px; max-width: 420px; background: #181825; border-right: 1px solid #313244; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; }
         .explorer-header { padding: 10px 14px 6px; font-size: 11px; font-weight: 700; color: #a6adc8; text-transform: uppercase; letter-spacing: 0.8px; flex-shrink: 0; }
         .explorer-tree { flex: 1; overflow: auto; padding-bottom: 12px; }
+        .explorer-tree-snapshot { flex: 3; min-height: 120px; }
+        .explorer-tree-release { flex: 2; min-height: 90px; border-top: 1px solid #313244; }
+        .release-head { border-top: 1px solid #313244; margin-top: 4px; }
+        .rel-doc summary, .rel-ver summary { list-style: none; display: flex; align-items: center; gap: 6px; padding: 3px 8px; font-size: 13px; color: #cdd6f4; cursor: pointer; user-select: none; white-space: nowrap; }
+        .rel-doc summary::-webkit-details-marker, .rel-ver summary::-webkit-details-marker { display: none; }
+        .rel-doc summary::before, .rel-ver summary::before { content: '▸'; display: inline-block; width: 10px; color: #6c7086; flex-shrink: 0; }
+        .rel-doc details[open] > summary::before, .rel-ver details[open] > summary::before { content: '▾'; }
+        .rel-ver summary:hover, .rel-doc summary:hover { background: #313244; }
+        .rel-badge { font-size: 9px; font-weight: 700; text-transform: uppercase; padding: 1px 6px; border-radius: 8px; letter-spacing: .4px; }
+        .rel-badge.candidate { background: #f9e2af26; color: #f9e2af; }
+        .rel-badge.approved { background: #a6e3a126; color: #a6e3a1; }
+        .rel-badge.published { background: #89dc4b26; color: #a6e3a1; }
+        .rel-badge.active { background: #cba6f733; color: #cba6f7; }
+        .rel-deps summary { color: #a6adc8; font-size: 12px; }
+        .rel-file { display: flex; align-items: center; gap: 6px; padding: 2px 8px; font-size: 12.5px; color: #cdd6f4; cursor: pointer; white-space: nowrap; }
+        .rel-file:hover { background: #313244; }
+        .rel-file.active { background: #45475a; color: #cba6f7; }
+        .rel-file .lock { color: #6c7086; }
         .explorer-tree summary { list-style: none; display: flex; align-items: center; gap: 2px; padding: 3px 8px; font-size: 13px; color: #cdd6f4; cursor: pointer; user-select: none; white-space: nowrap; }
         .explorer-tree summary::-webkit-details-marker { display: none; }
         .explorer-tree summary::before { content: '▸'; display: inline-block; width: 12px; color: #6c7086; transition: transform 0.1s; flex-shrink: 0; }
@@ -39,6 +57,44 @@
         .tree-file.active { background: #45475a; color: #cba6f7; }
         .tree-file .dirty-dot { margin-left: auto; color: #cba6f7; font-size: 10px; }
         .tree-empty { padding: 12px 14px; font-size: 12px; color: #6c7086; }
+
+        /* Explorer: creazione/rinomina */
+        .explorer-head-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 6px 14px; flex-shrink: 0; }
+        .explorer-actions { display: flex; gap: 4px; }
+        .explorer-actions button { padding: 1px 7px; font-size: 13px; border-radius: 6px; border: 1px solid #45475a; background: #313244; color: #cdd6f4; cursor: pointer; line-height: 1.5; }
+        .explorer-actions button:hover { background: #45475a; border-color: #585b70; }
+        .tree-file.selected, .explorer-tree summary.selected { background: #313244; outline: 1px solid #585b70; }
+        .tree-edit-input { font: inherit; font-size: 13px; background: #1e1e2e; color: #cdd6f4; border: 1px solid #cba6f7; border-radius: 4px; padding: 1px 5px; min-width: 60px; flex: 1; width: 100%; }
+        .tree-edit-input.invalid { border-color: #f38ba8; }
+        .edit-error { font-size: 11px; color: #f38ba8; padding: 1px 8px; white-space: normal; }
+
+        /* Menu contestuale */
+        .ctx-menu { position: fixed; z-index: 3000; background: #181825; border: 1px solid #45475a; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.5); padding: 4px; min-width: 190px; display: none; }
+        .ctx-menu.open { display: block; }
+        .ctx-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 13px; color: #cdd6f4; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+        .ctx-item:hover { background: #313244; }
+        .ctx-item .kbd { margin-left: auto; font-size: 11px; color: #6c7086; padding-left: 18px; }
+
+        /* Dialogo rinomina con proposta aggiornamento riferimenti */
+        .rename-overlay { position: fixed; inset: 0; background: rgba(17,17,27,.7); z-index: 2500; display: none; align-items: center; justify-content: center; }
+        .rename-overlay.open { display: flex; }
+        .rename-dialog { width: 600px; max-width: 92vw; max-height: 80vh; display: flex; flex-direction: column; background: #181825; border: 1px solid #45475a; border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.6); }
+        .rename-head { padding: 12px 14px; border-bottom: 1px solid #313244; font-size: 13px; font-weight: 600; color: #cba6f7; word-break: break-all; }
+        .rename-body { padding: 12px 14px; overflow: auto; }
+        .rename-ref { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; margin-bottom: 8px; cursor: pointer; }
+        .rename-ref input { margin-top: 2px; }
+        .rename-ref .rf { color: #89b4fa; }
+        .rename-ref .snip { font-family: 'JetBrains Mono', monospace; color: #a6adc8; word-break: break-all; }
+        .rename-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid #313244; }
+        .rename-foot button { padding: 6px 14px; border-radius: 6px; border: 1px solid #45475a; background: #313244; color: #cdd6f4; font-size: 13px; cursor: pointer; }
+        .rename-foot button:hover { background: #45475a; }
+        .rename-foot button.primary { background: #cba6f7; color: #1e1e2e; border-color: #cba6f7; font-weight: 600; }
+        .rename-foot button.primary:hover { background: #b4befe; }
+        .rename-foot button.danger { background: #f38ba8; color: #1e1e2e; border-color: #f38ba8; font-weight: 600; }
+        .rename-foot button.danger:hover { background: #eba0ac; }
+        .del-line { font-size: 12.5px; color: #cdd6f4; margin-bottom: 8px; }
+        .del-warn { font-size: 12px; color: #f9e2af; margin-bottom: 8px; }
+        .del-ref { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: #89b4fa; word-break: break-all; margin-bottom: 4px; }
 
         /* Sidebar resize handle */
         .sidebar-handle { width: 4px; cursor: col-resize; background: #313244; flex-shrink: 0; transition: background 0.15s; z-index: 10; }
@@ -63,6 +119,51 @@
         .editor-cm .cm-editor { height: 100%; }
         .editor-empty { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 10px; align-items: center; justify-content: center; color: #6c7086; font-size: 14px; }
         .editor-empty .kinds { font-size: 12px; letter-spacing: 0.5px; }
+        .image-host { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; overflow: auto; background: #181825; padding: 16px; }
+        .image-host img { max-width: 96%; max-height: 96%; border-radius: 6px; box-shadow: 0 6px 30px rgba(0,0,0,.55); background: #fff; }
+        .image-host .img-caption { position: absolute; bottom: 10px; right: 14px; background: rgba(24,24,37,.9); border: 1px solid #45475a; border-radius: 6px; padding: 3px 10px; font: 11px/1.4 monospace; color: #a6adc8; }
+
+        /* Pannello Pubblicazioni */
+        .versions-panel { position: fixed; top: 0; right: 0; width: 460px; max-width: 92vw; height: 100vh; background: #181825; border-left: 1px solid #45475a; z-index: 1000; display: flex; flex-direction: column; box-shadow: -8px 0 24px rgba(0,0,0,.45); }
+        .versions-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid #313244; font-size: 13px; font-weight: 600; color: #cba6f7; }
+        .versions-head button { margin-left: auto; }
+        .versions-body { flex: 1; overflow: auto; padding: 12px 14px; }
+        .versions-publish { display: flex; gap: 6px; margin-bottom: 14px; }
+        .versions-publish input { flex: 1; padding: 6px 10px; background: #1e1e2e; border: 1px solid #45475a; border-radius: 6px; color: #cdd6f4; font-size: 12px; }
+        .versions-publish button { padding: 6px 10px; }
+        .ver-row { border: 1px solid #313244; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; background: #1e1e2e; }
+        .ver-row .ver-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+        .ver-row .ver-note { font-size: 12px; color: #a6adc8; margin-top: 4px; }
+        .ver-row .ver-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+        .ver-row .ver-actions button { padding: 3px 10px; font-size: 12px; border-radius: 6px; border: 1px solid #45475a; background: #313244; color: #cdd6f4; cursor: pointer; }
+        .ver-row .ver-actions button:hover { background: #45475a; }
+        .badge { font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 2px 8px; border-radius: 10px; letter-spacing: .5px; }
+        .badge.candidate { background: #f9e2af33; color: #f9e2af; }
+        .badge.approved { background: #a6e3a133; color: #a6e3a1; }
+        .badge.rejected { background: #f38ba833; color: #f38ba8; }
+        .badge.active { background: #cba6f733; color: #cba6f7; }
+        .ver-approve { display: none; gap: 6px; margin-top: 8px; align-items: center; }
+        .ver-approve.open { display: flex; }
+        .ver-approve input { padding: 4px 8px; background: #1e1e2e; border: 1px solid #45475a; border-radius: 6px; color: #cdd6f4; font-size: 12px; }
+        .assist-instr { width: 100%; box-sizing: border-box; padding: 8px 10px; background: #1e1e2e; border: 1px solid #45475a; border-radius: 6px; color: #cdd6f4; font-size: 13px; font-family: inherit; resize: vertical; margin-bottom: 8px; }
+        .assist-ask { padding: 6px 14px; }
+        .assist-spiegazione { background: #313244; border-radius: 8px; padding: 10px 12px; font-size: 13px; color: #cdd6f4; margin-bottom: 12px; }
+        .diff { font-family: 'JetBrains Mono', monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all; border: 1px solid #313244; border-radius: 6px; padding: 6px 8px; margin: 6px 0; background: #11111b; }
+        .diff .d-eq { color: #6c7086; }
+        .diff .d-del { color: #f38ba8; background: #f38ba81a; }
+        .diff .d-add { color: #a6e3a1; background: #a6e3a11a; }
+        .assist-file { margin-bottom: 16px; }
+        .assist-file .path { font-size: 12px; color: #89b4fa; margin-bottom: 4px; }
+        .assist-apply { display: flex; justify-content: flex-end; }
+        .assist-settings { border: 1px solid #313244; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+        .assist-settings .panel-hint { margin-bottom: 8px; }
+        .assist-settings input { width: 100%; box-sizing: border-box; padding: 5px 8px; margin-bottom: 6px; background: #1e1e2e; border: 1px solid #45475a; border-radius: 6px; color: #cdd6f4; font-size: 12px; }
+        .assist-settings button { padding: 4px 10px; font-size: 12px; }
+        .import-row { margin-bottom: 10px; }
+        .import-row input[type="text"] { width: 100%; box-sizing: border-box; padding: 6px 10px; background: #1e1e2e; border: 1px solid #45475a; border-radius: 6px; color: #cdd6f4; font-size: 13px; }
+        .import-row input[type="file"] { width: 100%; font-size: 12px; color: #cdd6f4; }
+        .import-actions { display: flex; gap: 8px; margin-top: 8px; }
+        .panel-hint { font-size: 12px; color: #6c7086; margin-bottom: 12px; }
     </style>
     <script src="/js/editor.js"></script>
 </head>
@@ -75,15 +176,35 @@
         <button id="paged-toggle" class="on" onclick="togglePaged()" title="Paginazione Paged.js attiva — clicca per disattivarla">📄 Paged</button>
         <button onclick="popoutPreview()" title="Apri l'anteprima in una finestra separata del browser (sempre sincronizzata)">👁️ Popout</button>
         <button onclick="saveActive()" title="Salva il file del tab attivo (Ctrl/Cmd+S)">💾 Salva</button>
+        <button onclick="saveDraft()" title="Salva bozza del documento: snapshot della chiusura + commit nel repo bozze">🗂️ Bozza</button>
+        <button onclick="toggleVersions()" title="Versioni: bozza → candidata → approvata (con approvazione e rollback)">📚 Versioni</button>
+        <button onclick="toggleAssistant()" title="Assistente AI: propone modifiche ai template (applicazione con review)">🤖 Assistente</button>
+        <button onclick="toggleImport()" title="Importa DOCX come bozza di template o PDF come riferimento">📥 Importa</button>
         <button class="primary" onclick="printPdf()" title="Genera il PDF del template attivo nello stato corrente">🖨️ Stampa PDF</button>
     </div>
 
     <div class="workbench">
-        <!-- Explorer -->
+        <!-- Explorer: due sezioni — Snapshot (editabile) e Release (sola lettura) -->
         <aside class="explorer" id="explorer">
-            <div class="explorer-header">Explorer</div>
-            <div class="explorer-tree" id="explorer-tree">
+            <div class="explorer-head-row">
+                <div class="explorer-header" style="padding:0;">📝 Snapshot</div>
+                <div class="explorer-actions">
+                    <button id="btn-new-file" title="Nuovo file nella cartella selezionata (o root)">+ 📄</button>
+                    <button id="btn-new-dir" title="Nuova cartella nella cartella selezionata (o root)">+ 📁</button>
+                    <button id="btn-new-image" title="Carica immagine nella cartella selezionata (o assets/)">🖼️</button>
+                </div>
+            </div>
+            <div class="explorer-tree explorer-tree-snapshot" id="explorer-tree">
                 <div class="tree-empty">Caricamento…</div>
+            </div>
+            <div class="explorer-head-row release-head">
+                <div class="explorer-header" style="padding:0;">📦 Release</div>
+                <div class="explorer-actions">
+                    <button id="btn-release-refresh" title="Ricarica le release pubblicate">🔄</button>
+                </div>
+            </div>
+            <div class="explorer-tree explorer-tree-release" id="release-tree">
+                <div class="tree-empty">Nessuna release</div>
             </div>
         </aside>
         <div class="sidebar-handle" id="sidebar-handle"></div>
@@ -97,8 +218,97 @@
                     <span class="kinds">Apri un file dall'Explorer: 📄 HTML · 🎨 CSS · 📊 JSON</span>
                 </div>
                 <div class="editor-cm" id="editor" style="display:none"></div>
+                <div class="image-host" id="image-host"></div>
             </div>
         </main>
+    </div>
+
+    <input type="file" id="image-file-input" accept=".png,.jpg,.jpeg,.gif,.webp,.svg" style="display:none" />
+
+    <!-- Dialogo cancellazione (conferma o blocco per referenze) -->
+    <div class="rename-overlay" id="delete-overlay">
+        <div class="rename-dialog">
+            <div class="rename-head" id="delete-title" style="color:#f38ba8;"></div>
+            <div class="rename-body" id="delete-body"></div>
+            <div class="rename-foot">
+                <button id="delete-cancel" onclick="closeDeleteDialog()">Annulla</button>
+                <button class="danger" id="delete-confirm" onclick="confirmDelete()">Elimina</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Menu contestuale Explorer -->
+    <div class="ctx-menu" id="ctx-menu"></div>
+
+    <!-- Dialogo rinomina con proposta aggiornamento riferimenti -->
+    <div class="rename-overlay" id="rename-overlay">
+        <div class="rename-dialog">
+            <div class="rename-head" id="rename-title"></div>
+            <div class="rename-body" id="rename-refs"></div>
+            <div class="rename-foot">
+                <button onclick="closeRenameDialog()">Annulla</button>
+                <button class="primary" id="rename-confirm" onclick="confirmRenameDialog()">Rinomina e aggiorna</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pannello Pubblicazioni -->
+    <!-- Pannello Assistente LLM -->
+    <div class="versions-panel" id="assistant-panel" style="display:none">
+        <div class="versions-head">
+            <span>🤖 Assistente — <span id="assist-doc"></span></span>
+            <button onclick="closeAssistant()">×</button>
+        </div>
+        <div class="versions-body">
+            <div class="assist-settings">
+                <div class="panel-hint">Servizio AI (credenziali salvate solo in questo browser):</div>
+                <input type="text" id="llm-baseurl" placeholder="Base URL (es. https://gateway.opencode.ai/v1)" />
+                <input type="password" id="llm-apikey" placeholder="API key" />
+                <input type="text" id="llm-model" placeholder="Modello (es. MiMo-V2.5)" />
+                <button onclick="saveLlmSettings()">💾 Salva credenziali</button>
+            </div>
+            <div class="panel-hint" id="assist-status">Verifica configurazione…</div>
+            <textarea id="assist-instruction" rows="3" class="assist-instr"
+                placeholder="Descrivi la modifica (es. aggiungi sotto il totale la riga IVA al 22% e un box con le note legali)…"></textarea>
+            <button onclick="askAssistant()" class="assist-ask">🤖 Chiedi</button>
+            <div id="assist-result"></div>
+        </div>
+    </div>
+
+    <!-- Pannello Import -->
+    <div class="versions-panel" id="import-panel" style="display:none">
+        <div class="versions-head">
+            <span>📥 Importa</span>
+            <button onclick="closeImport()">×</button>
+        </div>
+        <div class="versions-body">
+            <div class="panel-hint">DOCX → <b>bozza di template HTML</b> (immagini estratte in assets/import/).<br>PDF → salvato come <b>riferimento</b> consultabile.</div>
+            <div class="import-row"><input type="file" id="import-file" accept=".docx,.pdf" /></div>
+            <div class="import-row"><input type="text" id="import-folder" placeholder="Cartella destinazione (es. CLIENTE_B — vuoto = root)" /></div>
+            <div class="import-actions">
+                <button onclick="doImport()">📥 Importa</button>
+            </div>
+            <div id="import-result" style="margin-top:10px"></div>
+        </div>
+    </div>
+
+    <div class="versions-panel" id="versions-panel" style="display:none">
+        <div class="versions-head">
+            <span>📚 Pubblicazioni — <span id="versions-doc"></span></span>
+            <button onclick="closeVersions()">×</button>
+        </div>
+        <div class="versions-body">
+            <div class="panel-hint">Ciclo di vita: <b>candidata</b> → approvazione → <b>approvata</b> (servita dall'API). Le versioni approvate sono immutabili.</div>
+            <div class="versions-publish">
+                <input id="publish-note" placeholder="Nota di pubblicazione…" />
+                <button onclick="publishCandidate()">📤 Pubblica candidate</button>
+            </div>
+            <div style="margin-bottom:12px">
+                <button onclick="syncReleases()" style="padding:3px 10px;font-size:12px;">🔄 Sincronizza col remote</button>
+                <span id="candidates-info" style="font-size:12px;color:#6c7086;"></span>
+            </div>
+            <div id="versions-list"></div>
+        </div>
     </div>
 
     <script th:inline="javascript">
@@ -130,6 +340,8 @@
         const buffers = new Map();        // relPath -> contenuto corrente (solo tab aperti)
         const savedContents = new Map();  // relPath -> contenuto su disco
         const collapsedDirs = new Set();
+        const releaseTabInfo = new Map();  // relPath release -> { document, version, path } (tab sola lettura)
+        const imageTabs = new Map();       // relPath immagine -> src (tab viewer, sola lettura)
 
         // ====== HELPERS ======
         function basename(p) { return p.split('/').pop(); }
@@ -141,10 +353,11 @@
             return m ? m[1].toLowerCase() : '';
         }
         function isModified(path) {
+            if (releaseTabInfo.has(path) || imageTabs.has(path)) return false; // sola lettura = mai dirty
             return buffers.has(path) && buffers.get(path) !== savedContents.get(path);
         }
         function flushActive() {
-            if (activeTab && view) buffers.set(activeTab, view.state.doc.toString());
+            if (activeTab && view && !imageTabs.has(activeTab)) buffers.set(activeTab, view.state.doc.toString());
         }
         function dirtyFilesMap() {
             flushActive();
@@ -216,6 +429,7 @@
             for (const node of nodes) {
                 if (node.type === 'dir') {
                     const details = document.createElement('details');
+                    details.dataset.path = node.path;
                     details.open = !collapsedDirs.has(node.path);
                     details.addEventListener('toggle', () => {
                         if (details.open) collapsedDirs.delete(node.path); else collapsedDirs.add(node.path);
@@ -223,12 +437,15 @@
                     const summary = document.createElement('summary');
                     summary.textContent = node.name;
                     summary.style.paddingLeft = (8 + depth * 14) + 'px';
+                    if (node.path === selectedPath) summary.classList.add('selected');
+                    summary.addEventListener('click', () => setSelection(node.path, true, summary));
                     details.appendChild(summary);
                     details.appendChild(buildTreeChildren(node.children || [], depth + 1));
                     frag.appendChild(details);
                 } else {
                     const row = document.createElement('div');
-                    row.className = 'tree-file' + (node.path === activeTab ? ' active' : '');
+                    row.className = 'tree-file' + (node.path === activeTab ? ' active' : '')
+                        + (node.path === selectedPath ? ' selected' : '');
                     row.style.paddingLeft = (14 + depth * 14) + 'px';
                     row.title = node.path;
                     const icon = document.createElement('span');
@@ -242,10 +459,10 @@
                         row.appendChild(dot);
                     }
                     if (node.kind === 'img') {
-                        row.style.cursor = 'default';
-                        row.title = node.path + ' (immagine)';
+                        row.title = node.path + ' (immagine: sola visualizzazione)';
+                        row.addEventListener('click', () => { setSelection(node.path, false, row); openImageTab(node.path, assetUrl(node.path)); });
                     } else {
-                        row.addEventListener('click', () => openFile(node.path));
+                        row.addEventListener('click', () => { setSelection(node.path, false, row); openFile(node.path); });
                     }
                     frag.appendChild(row);
                 }
@@ -253,10 +470,606 @@
             return frag;
         }
 
+        // ====== EXPLORER FILE OPS (nuovo file/cartella, rinomina con proposta riferimenti) ======
+        let selectedPath = null;
+        let selectedIsDir = false;
+        let editing = null;              // { mode: 'create'|'rename', input, rowEl, parentRel, oldPath, isDir, done }
+
+        function setSelection(path, isDir, el) {
+            selectedPath = path;
+            selectedIsDir = isDir;
+            const prev = document.querySelector('.tree-file.selected, .explorer-tree summary.selected');
+            if (prev) prev.classList.remove('selected');
+            if (el) el.classList.add('selected');
+        }
+
+        function parentDirOf(p) { return p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : ''; }
+
+        function invalidNameReason(name) {
+            if (!name) return 'Il nome non può essere vuoto';
+            if (name !== name.trim()) return 'Il nome non può iniziare/finire con spazi';
+            if (name.startsWith('.')) return 'I nomi non possono iniziare con un punto';
+            if (/[\\/:*?"<>|]/.test(name)) return 'Il nome contiene caratteri non validi';
+            if (name.length > 255) return 'Nome troppo lungo (max 255)';
+            return null;
+        }
+
+        async function apiPostJson(url, body) {
+            return await fetch(url, {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+        }
+
+        // --- inline edit: unico meccanismo per creazione e rinomina ---
+        function makeNameInput(value) {
+            const input = document.createElement('input');
+            input.className = 'tree-edit-input';
+            input.value = value;
+            input.spellcheck = false;
+            input.addEventListener('keydown', (e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') { e.preventDefault(); confirmEditing(); }
+                if (e.key === 'Escape') { e.preventDefault(); cancelEditing(); }
+            });
+            input.addEventListener('blur', () => { if (editing && !editing.done) confirmEditing(); });
+            return input;
+        }
+
+        function beginEditing(opts) {
+            if (editing) cancelEditing();
+            editing = { ...opts, done: false };
+        }
+
+        function endEditing() {
+            if (editing) editing.done = true;
+            editing = null;
+        }
+
+        function cancelEditing() {
+            if (!editing) return;
+            endEditing();
+            renderTree();
+        }
+
+        function showInlineError(rowEl, msg) {
+            clearInlineError(rowEl);
+            const err = document.createElement('div');
+            err.className = 'edit-error';
+            err.style.paddingLeft = rowEl.style.paddingLeft;
+            err.textContent = msg;
+            rowEl.after(err);
+        }
+
+        function clearInlineError(rowEl) {
+            if (rowEl.nextElementSibling && rowEl.nextElementSibling.classList.contains('edit-error')) {
+                rowEl.nextElementSibling.remove();
+            }
+        }
+
+        // +📄 / +📁 / menu contestuale su cartella: crea nella cartella selezionata (o root)
+        function startCreate(kind) {
+            closeContextMenu();
+            if (editing) return;
+            const isDir = kind === 'dir';
+            let parentRel = '';
+            if (selectedPath) parentRel = selectedIsDir ? selectedPath : parentDirOf(selectedPath);
+            const host = document.getElementById('explorer-tree');
+            if (parentRel) {
+                const segs = parentRel.split('/');
+                segs.forEach((_, i) => {
+                    const acc = segs.slice(0, i + 1).join('/');
+                    collapsedDirs.delete(acc);
+                    const d = host.querySelector('details[data-path="' + CSS.escape(acc) + '"]');
+                    if (d) d.open = true;
+                });
+            }
+            const container = parentRel
+                ? (host.querySelector('details[data-path="' + CSS.escape(parentRel) + '"]') || host)
+                : host;
+            const depth = parentRel ? parentRel.split('/').length : 0;
+            const row = document.createElement('div');
+            row.className = 'tree-file';
+            row.style.paddingLeft = (14 + depth * 14) + 'px';
+            const defaultName = isDir ? 'nuova-cartella' : 'nuovo.html';
+            const input = makeNameInput(defaultName);
+            row.appendChild(input);
+            container.appendChild(row);
+            beginEditing({ mode: 'create', input, rowEl: row, parentRel, isDir });
+            input.focus();
+            const dot = defaultName.lastIndexOf('.');
+            input.setSelectionRange(0, dot > 0 ? dot : defaultName.length);
+        }
+
+        // Rinomina: inline edit sull'etichetta del nodo selezionato
+        function startRename() {
+            closeContextMenu();
+            if (!selectedPath || editing) return;
+            const path = selectedPath;
+            const isDir = selectedIsDir;
+            const host = document.getElementById('explorer-tree');
+            let rowEl;
+            if (isDir) {
+                const d = host.querySelector('details[data-path="' + CSS.escape(path) + '"]');
+                rowEl = d ? d.querySelector(':scope > summary') : null;
+            } else {
+                rowEl = [...host.querySelectorAll('.tree-file')].find(r => r.title === path || r.title.startsWith(path + ' ('));
+            }
+            if (!rowEl) return;
+            const name = path.split('/').pop();
+            const input = makeNameInput(name);
+            beginEditing({ mode: 'rename', input, rowEl, oldPath: path, isDir });
+            rowEl.textContent = '';
+            const iconEl = document.createElement('span');
+            iconEl.textContent = isDir ? '📁' : (KIND_ICON[kindOfPath(path)] || '📄');
+            rowEl.style.display = 'flex';
+            rowEl.append(iconEl, input);
+            input.focus();
+            const dot = name.lastIndexOf('.');
+            input.setSelectionRange(0, dot > 0 ? dot : name.length);
+        }
+
+        async function confirmEditing() {
+            if (!editing || editing.done) return;
+            editing.done = true;              // guard: Enter + blur non devono dopp-innescare
+            const st = editing;
+            const name = st.input.value.trim();
+            const reason = invalidNameReason(name);
+            if (reason) {
+                st.done = false;
+                st.input.classList.add('invalid');
+                showInlineError(st.rowEl, reason);
+                st.input.focus();
+                return;
+            }
+            st.input.classList.remove('invalid');
+            clearInlineError(st.rowEl);
+            try {
+                if (st.mode === 'create') {
+                    const rel = st.parentRel ? st.parentRel + '/' + name : name;
+                    const resp = await apiPostJson('/workspace/node',
+                        { workspace: workspacePath, path: rel, type: st.isDir ? 'dir' : 'file' });
+                    if (resp.status === 409) {
+                        st.done = false;
+                        showInlineError(st.rowEl, 'Esiste già un elemento con questo nome');
+                        st.input.focus();
+                        st.input.select();
+                        return;
+                    }
+                    if (!resp.ok) throw new Error(await resp.text());
+                    endEditing();
+                    const segs = st.parentRel.split('/').filter(Boolean);
+                    segs.forEach((_, i) => collapsedDirs.delete(segs.slice(0, i + 1).join('/')));
+                    await loadTree();
+                    if (!st.isDir) await openFile(rel);
+                    showStatus('✓ Creato ' + rel);
+                } else {
+                    const parent = parentDirOf(st.oldPath);
+                    const to = parent ? parent + '/' + name : name;
+                    if (to === st.oldPath) { endEditing(); renderTree(); return; }
+                    endEditing();
+                    renderTree();
+                    await doRename(st.oldPath, to);
+                }
+            } catch (e) {
+                endEditing();
+                renderTree();
+                alert('Operazione fallita: ' + e.message);
+            }
+        }
+
+        // --- rinomina con proposta di aggiornamento riferimenti (D6 della spec) ---
+        async function doRename(from, to) {
+            let refs = [];
+            try {
+                const scan = await (await apiPostJson('/workspace/rename/scan', { workspace: workspacePath, from })).json();
+                refs = scan.references || [];
+            } catch (e) { /* la scansione è un miglioramento: senza, si rinomina comunque */ }
+            if (refs.length) {
+                openRenameDialog(from, to, refs);
+            } else {
+                await executeRename(from, to, false);
+            }
+        }
+
+        let pendingRename = null;
+        function openRenameDialog(from, to, refs) {
+            pendingRename = { from, to };
+            document.getElementById('rename-title').textContent = 'Rinomina ' + from + '  →  ' + to;
+            const body = document.getElementById('rename-refs');
+            body.innerHTML = '';
+            const hint = document.createElement('div');
+            hint.className = 'panel-hint';
+            hint.textContent = 'Aggiorna anche i riferimenti trovati nei template:';
+            body.appendChild(hint);
+            for (const r of refs) {
+                const row = document.createElement('label');
+                row.className = 'rename-ref';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.checked = true;
+                const txt = document.createElement('span');
+                const f = document.createElement('div');
+                f.className = 'rf';
+                f.textContent = r.file;
+                const s = document.createElement('div');
+                s.className = 'snip';
+                s.textContent = r.snippet;
+                txt.append(f, s);
+                row.append(cb, txt);
+                body.appendChild(row);
+            }
+            document.getElementById('rename-confirm').textContent = 'Rinomina e aggiorna (' + refs.length + ')';
+            document.getElementById('rename-overlay').classList.add('open');
+        }
+
+        function closeRenameDialog() {
+            document.getElementById('rename-overlay').classList.remove('open');
+            pendingRename = null;
+        }
+
+        async function confirmRenameDialog() {
+            if (!pendingRename) return;
+            const { from, to } = pendingRename;
+            const boxes = [...document.querySelectorAll('#rename-refs input[type="checkbox"]')];
+            const anyChecked = boxes.some(cb => cb.checked);
+            closeRenameDialog();
+            await executeRename(from, to, anyChecked);
+        }
+
+        async function executeRename(from, to, updateRefs) {
+            try {
+                const resp = await apiPostJson('/workspace/rename',
+                    { workspace: workspacePath, from, to, updateReferences: updateRefs });
+                if (resp.status === 409) { alert('Esiste già un elemento con il nome di destinazione.'); return; }
+                if (!resp.ok) { alert('Rinomina fallita:\n' + await resp.text()); return; }
+                const data = await resp.json();
+                for (const mv of (data.moved || [])) applyRenameToState(mv.from, mv.to);
+                await loadTree();
+                renderTabs();
+                const n = (data.updated || []).length;
+                showStatus('✓ Rinominato ' + from + ' → ' + to + (n ? ' — ' + n + ' file aggiornati' : ''));
+            } catch (e) {
+                alert('Rinomina fallita: ' + e.message);
+            }
+        }
+
+        // Remap dei tab aperti e dello stato editor dopo uno spostamento (anche con prefisso cartella)
+        function applyRenameToState(from, to) {
+            const remap = (p) => {
+                if (p === from) return to;
+                if (p.startsWith(from + '/')) return to + p.slice(from.length);
+                return null;
+            };
+            const rekey = (m) => {
+                for (const [k, v] of [...m]) {
+                    const n = remap(k);
+                    if (n) { m.delete(k); m.set(n, v); }
+                }
+            };
+            for (let i = 0; i < openTabs.length; i++) {
+                const n = remap(openTabs[i]);
+                if (n) openTabs[i] = n;
+            }
+            rekey(buffers); rekey(savedContents); rekey(tabStates); rekey(tabScroll); rekey(fileKinds); rekey(imageTabs);
+            if (activeTab) activeTab = remap(activeTab) || activeTab;
+            if (lastActiveTemplate) lastActiveTemplate = remap(lastActiveTemplate) || lastActiveTemplate;
+        }
+
+        // --- menu contestuale (right-click, delegato sull'albero: sopravvive ai re-render) ---
+        const ctxMenu = document.getElementById('ctx-menu');
+        const explorerTreeHost = document.getElementById('explorer-tree');
+        explorerTreeHost.addEventListener('contextmenu', (e) => {
+            const row = e.target.closest('.tree-file');
+            const summary = e.target.closest('.explorer-tree summary, summary');
+            if (row) {
+                e.preventDefault();
+                openContextMenu(e, row.title.replace(/ \(immagine\)$/, ''), false, row);
+            } else if (summary && summary.parentElement && summary.parentElement.dataset.path) {
+                e.preventDefault();
+                openContextMenu(e, summary.parentElement.dataset.path, true, summary);
+            }
+        });
+        function openContextMenu(e, path, isDir, el) {
+            setSelection(path, isDir, el);
+            ctxMenu.innerHTML = '';
+            const items = [];
+            if (isDir) {
+                items.push({ label: '📄 Nuovo file', fn: () => { closeContextMenu(); startCreate('file'); } });
+                items.push({ label: '📁 Nuova cartella', fn: () => { closeContextMenu(); startCreate('dir'); } });
+            }
+            items.push({ label: '✏️ Rinomina', kbd: 'F2', fn: () => { closeContextMenu(); startRename(); } });
+            items.push({ label: '🗑️ Elimina', fn: () => { closeContextMenu(); startDelete(path, isDir); } });
+            for (const it of items) {
+                const item = document.createElement('div');
+                item.className = 'ctx-item';
+                const lbl = document.createElement('span');
+                lbl.textContent = it.label;
+                item.appendChild(lbl);
+                if (it.kbd) {
+                    const k = document.createElement('span');
+                    k.className = 'kbd';
+                    k.textContent = it.kbd;
+                    item.appendChild(k);
+                }
+                item.addEventListener('click', it.fn);
+                ctxMenu.appendChild(item);
+            }
+            ctxMenu.classList.add('open');
+            const mw = ctxMenu.offsetWidth, mh = ctxMenu.offsetHeight;
+            ctxMenu.style.left = Math.max(4, Math.min(e.clientX, window.innerWidth - mw - 8)) + 'px';
+            ctxMenu.style.top = Math.max(4, Math.min(e.clientY, window.innerHeight - mh - 8)) + 'px';
+        }
+
+        function closeContextMenu() { ctxMenu.classList.remove('open'); }
+        // chiusura su pointerdown esterno (primario): precede ogni click sintetizzato dal right-click,
+        // quindi il menu non può essere richiuso dalla stessa interazione che lo ha aperto
+        document.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0) return;
+            if (!ctxMenu.contains(e.target)) closeContextMenu();
+        });
+        // se l'albero scorre, il menu perde l'ancora → si chiude (solo scroll reale dell'albero)
+        explorerTreeHost.addEventListener('scroll', closeContextMenu);
+        window.addEventListener('resize', closeContextMenu);
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { closeContextMenu(); closeRenameDialog(); closeDeleteDialog(); }
+            if (e.key === 'F2' && !editing) {
+                const ae = document.activeElement;
+                if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+                if (selectedPath) { e.preventDefault(); startRename(); }
+            }
+        });
+
+        // ====== EXPLORER RELEASE (sola lettura) ======
+        let releaseTree = [];
+
+        async function loadReleaseTree() {
+            const host = document.getElementById('release-tree');
+            try {
+                const resp = await fetch('/workspace/release-tree?workspace=' + encodeURIComponent(workspacePath), { credentials: 'same-origin' });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                releaseTree = await resp.json();
+                renderReleaseTree();
+            } catch (e) {
+                host.innerHTML = '<div class="tree-empty">Errore caricamento release</div>';
+                console.error('Release tree load failed:', e);
+            }
+        }
+
+        function relKind(path) {
+            const m = path.match(/\.([a-z0-9]+)$/i);
+            return m ? m[1].toLowerCase() : '';
+        }
+
+        function renderReleaseTree() {
+            const host = document.getElementById('release-tree');
+            host.innerHTML = '';
+            if (!releaseTree || !releaseTree.length) {
+                host.innerHTML = '<div class="tree-empty">Nessuna release pubblicata</div>';
+                return;
+            }
+            for (const doc of releaseTree) {
+                const docEl = document.createElement('details');
+                docEl.className = 'rel-doc';
+                docEl.open = true; // il documento si apre da solo: le versioni sono subito visibili
+                const sum = document.createElement('summary');
+                sum.textContent = '📦 ' + doc.document;
+                sum.title = doc.document;
+                docEl.appendChild(sum);
+                for (const ver of [...(doc.versions || [])].sort((a, b) => b.version - a.version)) {
+                    docEl.appendChild(buildReleaseVersion(doc.document, ver));
+                }
+                host.appendChild(docEl);
+            }
+        }
+
+        function buildReleaseVersion(documentPath, ver) {
+            const el = document.createElement('details');
+            el.className = 'rel-ver';
+            el.open = ver.active; // la versione attiva è espansa di default
+            const sum = document.createElement('summary');
+            const label = document.createElement('span');
+            label.textContent = 'v' + ver.version;
+            sum.appendChild(label);
+            const badge = document.createElement('span');
+            badge.className = 'rel-badge ' + (ver.status || 'candidate');
+            badge.textContent = ver.status || '?';
+            sum.appendChild(badge);
+            if (ver.active) {
+                const act = document.createElement('span');
+                act.className = 'rel-badge active';
+                act.textContent = 'attiva ✓';
+                sum.appendChild(act);
+            }
+            if (ver.note) sum.title = ver.note;
+            el.appendChild(sum);
+
+            const own = (ver.files || []).filter(f => !f.dep);
+            const deps = (ver.files || []).filter(f => f.dep);
+            for (const f of own) el.appendChild(buildReleaseFileRow(documentPath, ver.version, f.path));
+            if (deps.length) {
+                const depsEl = document.createElement('details');
+                depsEl.className = 'rel-deps';
+                const dsum = document.createElement('summary');
+                dsum.textContent = '🔒 dipendenze congelate (' + deps.length + ')';
+                depsEl.appendChild(dsum);
+                for (const f of deps) depsEl.appendChild(buildReleaseFileRow(documentPath, ver.version, f.path));
+                el.appendChild(depsEl);
+            }
+            return el;
+        }
+
+        function relIsImage(path) {
+            return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(relKind(path));
+        }
+
+        function buildReleaseFileRow(documentPath, version, path) {
+            const row = document.createElement('div');
+            row.className = 'rel-file' + (path === activeTab ? ' active' : '');
+            row.style.paddingLeft = '26px';
+            const ext = relKind(path);
+            const isImage = relIsImage(path);
+            row.title = path + (isImage ? ' (release: immagine, sola visualizzazione)' : ' (release: sola lettura)');
+            const icon = document.createElement('span');
+            icon.textContent = isImage ? '🖼️' : (KIND_ICON[ext] || '📄');
+            const name = document.createElement('span');
+            name.textContent = basename(path);
+            const lock = document.createElement('span');
+            lock.className = 'lock';
+            lock.textContent = '🔒';
+            row.append(icon, name, lock);
+            if (isImage) {
+                row.addEventListener('click', () => openImageTab(path,
+                    '/workspace/release-asset?workspace=' + encodeURIComponent(workspacePath)
+                    + '&path=' + encodeURIComponent(path)));
+            } else {
+                row.addEventListener('click', () => openReleaseFile(path, documentPath, version));
+            }
+            return row;
+        }
+
+        async function openReleaseFile(path, document, version) {
+            if (!openTabs.includes(path)) {
+                try {
+                    const content = await apiGet('/workspace/release-file?workspace=' + encodeURIComponent(workspacePath)
+                        + '&path=' + encodeURIComponent(path));
+                    buffers.set(path, content);
+                    savedContents.set(path, content);
+                    tabStates.set(path, CM6.makeState(relKind(path), content, {
+                        readOnly: true,
+                        onSave: () => showStatus('🔒 Versione pubblicata: sola lettura'),
+                    }));
+                    openTabs.push(path);
+                    releaseTabInfo.set(path, { document, version, path });
+                } catch (e) {
+                    console.error('Open release failed:', e);
+                    alert('Impossibile aprire ' + path);
+                    return;
+                }
+            }
+            activateTab(path);
+        }
+
+        function activeReleaseInfo() {
+            return (activeTab && releaseTabInfo.has(activeTab)) ? releaseTabInfo.get(activeTab) : null;
+        }
+
+        // ====== DELETE (solo snapshot; bloccato se referenziato) ======
+        let pendingDelete = null;
+
+        function startDelete(path, isDir) {
+            closeContextMenu();
+            if (isDir) { openDeleteDialog(path, true, [], false); return; }
+            apiPostJson('/workspace/rename/scan', { workspace: workspacePath, from: path })
+                .then(r => r.json())
+                .then(scan => {
+                    const refs = scan.references || [];
+                    if (refs.length) openDeleteDialog(path, false, refs, true);
+                    else openDeleteDialog(path, false, [], false);
+                })
+                .catch(() => openDeleteDialog(path, false, [], false));
+        }
+
+        function openDeleteDialog(path, isDir, refs, blocked) {
+            pendingDelete = { path, isDir, blocked };
+            document.getElementById('delete-title').textContent = (blocked ? '🚫 Impossibile cancellare ' : '🗑️ Eliminare ') + path;
+            const body = document.getElementById('delete-body');
+            body.innerHTML = '';
+            if (blocked) {
+                const hint = document.createElement('div');
+                hint.className = 'del-line';
+                hint.innerHTML = 'È <b>referenziato da ' + refs.length + ' file</b>: rimuovi o aggiorna prima i riferimenti' +
+                    ' (a mano o con l\'assistente 🤖), oppure sostituisci il file con uno nuovo. Poi riprova.';
+                body.appendChild(hint);
+                for (const r of refs) {
+                    const rf = document.createElement('div');
+                    rf.className = 'del-ref';
+                    rf.textContent = '• ' + r.file;
+                    body.appendChild(rf);
+                }
+                document.getElementById('delete-confirm').textContent = 'Ho capito';
+                document.getElementById('delete-overlay').classList.add('open');
+                return;
+            }
+            const lines = [];
+            if (isDir) {
+                lines.push('La cartella verrà rimossa (le cartelle si cancellano solo se vuote).');
+            } else {
+                if (releaseTabInfo.has(path) || imageTabs.has(path)) { /* mai: tab release aperti solo da lì */ }
+                if (relKind(path) === 'html') {
+                    lines.push('📄 È un documento principale: nessun riferimento in ingresso.');
+                    const docRel = path.replace(/\.html$/i, '');
+                    const entry = (releaseTree || []).find(d => d.document === docRel);
+                    if (entry && entry.versions.length) {
+                        lines.push('⚠️ Esistono ' + entry.versions.length + ' versioni pubblicate: continueranno a essere servite dall\'API (immutabili), ma il documento non sarà più modificabile.');
+                    }
+                    const pair = swapExt(path, '.json');
+                    if (openTabs.includes(pair) || fileKinds.has(pair)) {
+                        lines.push('📊 Verrà cancellata anche la coppia ' + basename(pair) + ' (accoppiata del modello).');
+                    }
+                }
+                if (isModified(path)) {
+                    lines.push('⚠️ Il tab aperto ha modifiche non salvate che andranno perse.');
+                }
+                lines.push('Le release già pubblicate non vengono toccate. Recuperabile dallo storico git solo se era stato committato.');
+            }
+            for (const t of lines) {
+                const d = document.createElement('div');
+                d.className = t.startsWith('⚠️') ? 'del-warn' : 'del-line';
+                d.textContent = t;
+                body.appendChild(d);
+            }
+            document.getElementById('delete-confirm').textContent = 'Elimina definitivamente';
+            document.getElementById('delete-overlay').classList.add('open');
+        }
+
+        function closeDeleteDialog() {
+            document.getElementById('delete-overlay').classList.remove('open');
+            pendingDelete = null;
+        }
+
+        async function confirmDelete() {
+            if (!pendingDelete) return;
+            const { path, blocked } = pendingDelete;
+            closeDeleteDialog();
+            if (blocked) return; // dialogo informativo: nessuna azione
+            try {
+                const resp = await apiPostJson('/workspace/delete', { workspace: workspacePath, path });
+                if (resp.status === 409) {
+                    const data = await resp.json();
+                    openDeleteDialog(path, false, (data.referencedBy || []).map(f => ({ file: f })), true);
+                    return;
+                }
+                if (!resp.ok) { alert('Cancellazione fallita:\n' + await resp.text()); return; }
+                const data = await resp.json();
+                for (const p of [...openTabs]) {
+                    if (p === path || p.startsWith(path + '/')) closeTab(p);
+                }
+                await loadTree();
+                showStatus('✓ Cancellato ' + ((data.deleted || []).join(', ') || path));
+            } catch (e) {
+                alert('Cancellazione fallita: ' + e.message);
+            }
+        }
+
         // ====== TABS ======
+        function assetUrl(path) {
+            return '/workspace/asset?workspace=' + encodeURIComponent(workspacePath) + '&file=' + encodeURIComponent(path);
+        }
+
+        function openImageTab(path, src) {
+            if (!openTabs.includes(path)) {
+                openTabs.push(path);
+                imageTabs.set(path, src);
+            }
+            activateTab(path);
+        }
+
         async function openFile(path) {
             if (!EDITABLE_KINDS.includes(kindOfPath(path))) {
-                showStatus('🖼️ ' + path + ' (immagine: solo riferimento, non modificabile)');
+                if (kindOfPath(path) === 'img') { openImageTab(path, assetUrl(path)); return; }
+                showStatus('❓ ' + path + ' (tipo non supportato)');
                 return;
             }
             if (!openTabs.includes(path)) {
@@ -277,19 +1090,33 @@
 
         function activateTab(path) {
             if (!view) return;
-            if (activeTab && activeTab !== path) {
+            if (activeTab && activeTab !== path && !imageTabs.has(activeTab)) {
                 tabStates.set(activeTab, view.state);
                 tabScroll.set(activeTab, view.scrollDOM.scrollTop);
                 buffers.set(activeTab, view.state.doc.toString());
             }
             activeTab = path;
+            emptyEl.style.display = 'none';
+            const imageHost = document.getElementById('image-host');
+            if (imageTabs.has(path)) {
+                // viewer immagine: l'editor resta nascosto, nessuno stato CM da ripristinare
+                editorHost.style.display = 'none';
+                imageHost.style.display = 'flex';
+                imageHost.innerHTML = '<img src="' + imageTabs.get(path) + '" alt="" />'
+                    + '<div class="img-caption">🖼️ ' + path + ' — sola visualizzazione</div>';
+                renderTabs();
+                renderTree();
+                renderReleaseTree();
+                return;
+            }
+            imageHost.style.display = 'none';
             view.setState(tabStates.get(path));
             view.scrollDOM.scrollTop = tabScroll.get(path) || 0;
-            emptyEl.style.display = 'none';
             editorHost.style.display = '';
-            if (kindOfPath(path) === 'html') lastActiveTemplate = path;
+            if (kindOfPath(path) === 'html' && !releaseTabInfo.has(path)) lastActiveTemplate = path;
             renderTabs();
             renderTree();
+            renderReleaseTree();
             if (popoutWin && !popoutWin.closed) refreshPreview();
         }
 
@@ -304,6 +1131,8 @@
             savedContents.delete(path);
             tabStates.delete(path);
             tabScroll.delete(path);
+            releaseTabInfo.delete(path);
+            imageTabs.delete(path);
             if (activeTab === path) {
                 activeTab = null;
                 const next = openTabs[Math.min(idx, openTabs.length - 1)];
@@ -312,6 +1141,7 @@
             if (lastActiveTemplate === path || !openTabs.includes(lastActiveTemplate)) recomputeLastTemplate();
             renderTabs();
             renderTree();
+            renderReleaseTree();
         }
 
         function recomputeLastTemplate() {
@@ -340,7 +1170,8 @@
                 const icon = document.createElement('span');
                 icon.textContent = KIND_ICON[kindOfPath(path)] || '📄';
                 const label = document.createElement('span');
-                label.textContent = basename(path);
+                const relInfo = releaseTabInfo.get(path);
+                label.textContent = relInfo ? ('v' + relInfo.version + ' · ' + basename(path)) : basename(path);
                 const dot = document.createElement('span');
                 dot.className = 'dirty-dot' + (isModified(path) ? ' on' : '');
                 dot.textContent = '●';
@@ -357,11 +1188,14 @@
 
         // ====== PREVIEW (solo via popout) ======
         function pickTemplate() {
-            if (activeTab && kindOfPath(activeTab) === 'html') return activeTab;
+            if (activeTab && kindOfPath(activeTab) === 'html' && !releaseTabInfo.has(activeTab)) return activeTab;
+            if (activeTab && releaseTabInfo.has(activeTab)) return null; // release: niente preview/stampa dal workspace
             return lastActiveTemplate;
         }
 
         async function refreshPreview() {
+            const rel = activeReleaseInfo();
+            if (rel) { await refreshReleasePreview(rel); return; }
             flushActive();
             const template = pickTemplate();
             if (!template) { console.log('Nessun template aperto: anteprima non disponibile'); return; }
@@ -391,6 +1225,29 @@
                 syncPopout(doc, popoutTitle(info));
             } catch (e) {
                 console.error('Preview failed:', e);
+            }
+        }
+
+        // Anteprima di una versione pubblicata: renderizzata dallo snapshot congelato (immagini data-URI)
+        async function refreshReleasePreview(rel) {
+            const seq = ++previewSeq;
+            try {
+                const resp = await fetch('/release/preview?version=' + rel.version, {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ workspace: workspacePath, template: rel.document + '.html', dirtyFiles: {} }),
+                });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const html = await resp.text();
+                if (seq !== previewSeq) return;
+                const info = { template: rel.document + '@v' + rel.version, json: true, cssLinks: null, live: false };
+                const doc = buildPreviewDoc(html, info);
+                lastPreviewDoc = doc;
+                lastPreviewInfo = info;
+                previewDirty = false;
+                syncPopout(doc, popoutTitle(info));
+            } catch (e) {
+                console.error('Release preview failed:', e);
             }
         }
 
@@ -487,15 +1344,26 @@
         }
 
         // ====== SALVATAGGIO ======
-        async function saveActive() {
+        async function saveActive(force = false) {
             flushActive();
+            if (activeTab && (releaseTabInfo.has(activeTab) || imageTabs.has(activeTab))) {
+                showStatus('🔒 ' + basename(activeTab) + ': sola lettura');
+                return;
+            }
             if (!activeTab) return;
             try {
                 const resp = await fetch('/workspace/file', {
                     method: 'POST', credentials: 'same-origin',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ workspace: workspacePath, file: activeTab, content: buffers.get(activeTab) }),
+                    body: JSON.stringify({
+                        workspace: workspacePath, file: activeTab, content: buffers.get(activeTab),
+                        expectedContent: force ? null : (savedContents.get(activeTab) ?? null),
+                    }),
                 });
+                if (resp.status === 409) {
+                    if (!confirm('Il file è stato modificato su disco da un altro utente.\n\nSovrascrivere comunque con la tua versione?')) return;
+                    return saveActive(true);
+                }
                 if (!resp.ok) { alert('Salvataggio fallito:\n' + await resp.text()); return; }
                 savedContents.set(activeTab, buffers.get(activeTab));
                 renderTabs();
@@ -519,6 +1387,8 @@
         // ====== STAMPA PDF ======
         async function printPdf() {
             flushActive();
+            const rel = activeReleaseInfo();
+            if (rel && kindOfPath(activeTab) === 'html') { await printRelease(rel); return; }
             const template = pickTemplate();
             if (!template) { alert('Apri un template .html prima di stampare.'); return; }
 
@@ -542,6 +1412,465 @@
             } catch (e) {
                 alert('Generazione PDF fallita: ' + e.message);
             }
+        }
+
+        // Stampa PDF di una versione pubblicata: sempre e solo dallo snapshot congelato
+        async function printRelease(rel) {
+            const templateRel = rel.path.split('/files/')[1];
+            showStatus('⏳ Generazione PDF release…');
+            try {
+                const resp = await fetch('/release/print', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ workspace: workspacePath, document: rel.document, version: rel.version, template: templateRel }),
+                });
+                if (!resp.ok) { alert(await resp.text()); return; }
+                const blob = await resp.blob();
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = templateRel.replace(/\.html$/i, '').replace(/\//g, '-') + '-v' + rel.version + '.pdf';
+                a.click();
+                URL.revokeObjectURL(a.href);
+                showStatus('✓ PDF release generato');
+            } catch (e) {
+                alert('Generazione PDF release fallita: ' + e.message);
+            }
+        }
+
+        // ===== PUBBLICAZIONI (bozza → candidata → approvata) =====
+        let versionsDoc = null;
+
+        function documentName(t) { return t.replace(/\.html$/i, ''); }
+        function toggleVersions() {
+            closeAssistant();
+            closeImport();
+            const panel = document.getElementById('versions-panel');
+            if (panel.style.display === 'flex') { panel.style.display = 'none'; return; }
+            flushActive();
+            const template = pickTemplate();
+            if (!template) { alert('Apri un template .html per gestirne le versioni.'); return; }
+            versionsDoc = documentName(template);
+            document.getElementById('versions-doc').textContent = versionsDoc;
+            panel.style.display = 'flex';
+            refreshVersions();
+        }
+        function closeVersions() { document.getElementById('versions-panel').style.display = 'none'; }
+
+        function toggleAssistant() {
+            closeImport();
+            closeVersions();
+            flushActive();
+            const template = pickTemplate();
+            if (!template) { alert('Apri un template .html per usare l\'assistente.'); return; }
+            assistantDoc = documentName(template);
+            document.getElementById('assist-doc').textContent = assistantDoc;
+            document.getElementById('assistant-panel').style.display = 'flex';
+            document.getElementById('assist-result').innerHTML = '';
+            fetch('/llm/status', { credentials: 'same-origin' }).then(r => r.json()).then(s => {
+                document.getElementById('assist-status').textContent = s.enabled
+                    ? '🤖 Modello: ' + s.model
+                    : '⚠️ Assistente non configurato: imposta app.llm.enabled/base-url/model (endpoint OpenAI-compatibile o Ollama).';
+            }).catch(() => { document.getElementById('assist-status').textContent = '⚠️ Stato assistente non disponibile'; });
+        }
+        function closeAssistant() { document.getElementById('assistant-panel').style.display = 'none'; }
+        function closeImport() { document.getElementById('import-panel').style.display = 'none'; }
+        function toggleImport() {
+            closeAssistant();
+            closeVersions();
+            const panel = document.getElementById('import-panel');
+            panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
+        }
+
+        async function doImport() {
+            const fileInput = document.getElementById('import-file');
+            const file = fileInput.files[0];
+            if (!file) { alert('Seleziona un file .docx o .pdf'); return; }
+            const folder = document.getElementById('import-folder').value.trim();
+            const isPdf = file.name.toLowerCase().endsWith('.pdf');
+            const fd = new FormData();
+            fd.append('workspace', workspacePath);
+            fd.append('folder', folder);
+            fd.append('file', file);
+            const res = document.getElementById('import-result');
+            res.innerHTML = '<div class="panel-hint">⏳ Importazione…</div>';
+            try {
+                const resp = await fetch(isPdf ? '/workspace/import-reference' : '/workspace/import-docx',
+                    { method: 'POST', credentials: 'same-origin', body: fd });
+                const text = await resp.text();
+                if (!resp.ok) { res.innerHTML = '<div class="panel-hint" style="color:#f38ba8">' + text + '</div>'; return; }
+                if (isPdf) {
+                    const data = JSON.parse(text);
+                    loadTree();
+                    res.innerHTML = '<div class="panel-hint">✓ Riferimento salvato: ' + data.path
+                        + ' — <a href="' + data.url + '" target="_blank" style="color:#89b4fa">apri</a></div>';
+                } else {
+                    const data = JSON.parse(text);
+                    await loadTree();
+                    await openFile(data.template);
+                    closeImport();
+                    showStatus('✓ Importato ' + data.template);
+                }
+            } catch (e) {
+                res.innerHTML = '<div class="panel-hint" style="color:#f38ba8">Errore: ' + e.message + '</div>';
+            }
+        }
+
+        async function syncReleases() {
+            const ok = await releasePost('/release/sync', { workspace: workspacePath }, '🔄 Sync completata');
+            if (ok) { refreshVersions(); refreshVersionsIfOpen(); }
+        }
+
+        async function refreshCandidates() {
+            try {
+                const resp = await fetch('/release/candidates?workspace=' + encodeURIComponent(workspacePath), { credentials: 'same-origin' });
+                const list = await resp.json();
+                const host = document.getElementById('candidates-info');
+                if (!list.length) { host.textContent = ''; return; }
+                host.textContent = '🔗 in attesa di merge: ' + list.map(c => c.branch).join(', ');
+            } catch (e) { /* non critico */ }
+        }
+
+        async function refreshVersions() {
+            refreshCandidates();
+            loadReleaseTree();
+            const list = document.getElementById('versions-list');
+            list.innerHTML = '<div class="panel-hint">Caricamento…</div>';
+            try {
+                const resp = await fetch('/release/list?workspace=' + encodeURIComponent(workspacePath)
+                    + '&document=' + encodeURIComponent(versionsDoc), { credentials: 'same-origin' });
+                if (resp.status === 404) {
+                    list.innerHTML = '<div class="panel-hint">Documento mai pubblicato. Usa "📤 Pubblica candidate" per creare la prima versione.</div>';
+                    return;
+                }
+                const data = await resp.json();
+                const host = document.getElementById('versions-list');
+                host.innerHTML = '';
+                for (const v of [...(data.versions || [])].sort((a, b) => b.version - a.version)) {
+                    const row = document.createElement('div');
+                    row.className = 'ver-row';
+                    const head = document.createElement('div');
+                    head.className = 'ver-head';
+                    const ver = document.createElement('b');
+                    ver.textContent = 'v' + v.version;
+                    const badge = document.createElement('span');
+                    badge.className = 'badge ' + v.status;
+                    badge.textContent = v.status;
+                    head.append(ver, badge);
+                    if (data.active === v.version) {
+                        const act = document.createElement('span');
+                        act.className = 'badge active';
+                        act.textContent = 'attiva ✓';
+                        head.append(act);
+                    }
+                    const when = document.createElement('span');
+                    when.style.cssText = 'margin-left:auto;color:#6c7086;font-size:11px;';
+                    when.textContent = (v.createdAt || '').replace('T', ' ').substring(0, 16);
+                    head.append(when);
+                    row.appendChild(head);
+                    if (v.note) {
+                        const note = document.createElement('div');
+                        note.className = 'ver-note';
+                        note.textContent = v.note;
+                        row.appendChild(note);
+                    }
+                    const actions = document.createElement('div');
+                    actions.className = 'ver-actions';
+                    const mk = (label, fn) => { const b = document.createElement('button'); b.textContent = label; b.addEventListener('click', fn); return b; };
+                    actions.append(mk('👁 Anteprima', () => previewVersion(v.version)));
+                    if (v.status === 'candidate') {
+                        actions.append(mk('✓ Approva', () => toggleApprove(row, v.version)));
+                        actions.append(mk('✕ Scarta', () => rejectVersion(v.version)));
+                    }
+                    if ((v.status === 'approved' || v.status === 'published') && data.active !== v.version) {
+                        actions.append(mk('⏪ Rollback', () => rollbackVersion(v.version)));
+                    }
+                    row.appendChild(actions);
+                    const ap = document.createElement('div');
+                    ap.className = 'ver-approve';
+                    ap.id = 'approve-' + v.version;
+                    ap.innerHTML = '<input type="date" data-role="efficacia" title="Data di efficacia (opzionale: per cambi di legge)" />';
+                    const conf = document.createElement('button');
+                    conf.textContent = 'Conferma approvazione';
+                    conf.addEventListener('click', () => approveVersion(v.version, ap.querySelector('input').value));
+                    ap.appendChild(conf);
+                    row.appendChild(ap);
+                    host.appendChild(row);
+                }
+            } catch (e) {
+                list.innerHTML = '<div class="panel-hint">Errore caricamento versioni</div>';
+                console.error(e);
+            }
+        }
+
+        function toggleApprove(row, version) {
+            const ap = row.querySelector('#approve-' + version);
+            ap.classList.toggle('open');
+        }
+
+        async function releasePost(url, body, okMsg) {
+            const resp = await fetch(url, { method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            if (!resp.ok) { alert((await resp.text()) || 'Operazione fallita'); return false; }
+            showStatus(okMsg);
+            return true;
+        }
+
+        async function saveDraft() {
+            flushActive();
+            const template = pickTemplate();
+            if (!template) { alert('Apri un template .html prima di salvare la bozza.'); return; }
+            const note = prompt('Nota per la bozza (opzionale):') ?? '';
+            if (note === null) return;
+            const ok = await releasePost('/release/draft',
+                { workspace: workspacePath, template, dirtyFiles: dirtyFilesMap(), note },
+                '✓ Bozza salvata');
+            if (ok) refreshVersionsIfOpen();
+        }
+
+        async function publishCandidate() {
+            const note = document.getElementById('publish-note').value;
+            try {
+                const resp = await fetch('/release/publish', { method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ workspace: workspacePath, template: versionsDoc, dirtyFiles: dirtyFilesMap(), note }) });
+                if (!resp.ok) { alert(await resp.text()); return; }
+                const data = await resp.json();
+                document.getElementById('publish-note').value = '';
+                refreshVersions();
+                if (data.prUrl) {
+                    showStatus('✓ Candidate v' + data.version + ' — PR aperta sul remote');
+                    if (confirm('Candidate v' + data.version + ' pubblicata.\nAprire la Pull Request per la review?')) {
+                        window.open(data.prUrl, '_blank');
+                    }
+                } else {
+                    showStatus('✓ Candidate v' + data.version + ' pubblicata');
+                }
+            } catch (e) { alert('Pubblicazione fallita: ' + e.message); }
+        }
+
+        async function approveVersion(version, effectiveFrom) {
+            let approver = localStorage.getItem('approver') || '';
+            approver = prompt('Nome approvatore:', approver); if (approver === null) return;
+            localStorage.setItem('approver', approver);
+            const ok = await releasePost('/release/approve',
+                { workspace: workspacePath, document: versionsDoc, version, approver, effectiveFrom: effectiveFrom || null },
+                '✓ v' + version + ' approvata' + (effectiveFrom ? ' (efficacia ' + effectiveFrom + ')' : ''));
+            if (ok) refreshVersions();
+        }
+
+        async function rejectVersion(version) {
+            if (!confirm('Scartare la v' + version + '?')) return;
+            const ok = await releasePost('/release/reject',
+                { workspace: workspacePath, document: versionsDoc, version, reason: '' }, '✓ Candidate scartata');
+            if (ok) refreshVersions();
+        }
+
+        async function rollbackVersion(version) {
+            if (!confirm("Riattivare la v" + version + " come versione attiva?")) return;
+            const ok = await releasePost('/release/rollback',
+                { workspace: workspacePath, document: versionsDoc, version, author: localStorage.getItem('approver') || 'workbench' },
+                '✓ Rollback alla v' + version);
+            if (ok) refreshVersions();
+        }
+
+        async function previewVersion(version) {
+            const resp = await fetch('/release/preview?version=' + version, { method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ workspace: workspacePath, template: versionsDoc + '.html', dirtyFiles: {} }) });
+            const html = await resp.text();
+            const w = window.open('', '_blank');
+            w.document.open();
+            w.document.write(buildPreviewDoc(html, { template: versionsDoc + '@v' + version, json: true, cssLinks: null, live: false }));
+            w.document.close();
+            w.document.title = '👁️ ' + versionsDoc + ' v' + version;
+        }
+
+        function refreshVersionsIfOpen() {
+            if (document.getElementById('versions-panel').style.display === 'flex') refreshVersions();
+        }
+
+        // ===== ASSISTENTE LLM (propone, l'utente applica) =====
+        let assistantDoc = null;
+        let assistProposals = null;
+
+        function toggleAssistant() {
+            closeImport();
+            closeVersions();
+            flushActive();
+            const template = pickTemplate();
+            if (!template) { alert('Apri un template .html per usare l\'assistente.'); return; }
+            assistantDoc = documentName(template);
+            document.getElementById('assist-doc').textContent = assistantDoc;
+            document.getElementById('assistant-panel').style.display = 'flex';
+            loadLlmSettingsInputs();
+            const res = document.getElementById('assist-result');
+            res.innerHTML = '';
+            updateAssistStatus();
+        }
+        function closeAssistant() { document.getElementById('assistant-panel').style.display = 'none'; }
+        function closeImport() { document.getElementById('import-panel').style.display = 'none'; }
+        function toggleImport() {
+            closeAssistant();
+            closeVersions();
+            const panel = document.getElementById('import-panel');
+            panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
+        }
+
+        async function doImport() {
+            const fileInput = document.getElementById('import-file');
+            const file = fileInput.files[0];
+            if (!file) { alert('Seleziona un file .docx o .pdf'); return; }
+            const folder = document.getElementById('import-folder').value.trim();
+            const isPdf = file.name.toLowerCase().endsWith('.pdf');
+            const fd = new FormData();
+            fd.append('workspace', workspacePath);
+            fd.append('folder', folder);
+            fd.append('file', file);
+            const res = document.getElementById('import-result');
+            res.innerHTML = '<div class="panel-hint">⏳ Importazione…</div>';
+            try {
+                const resp = await fetch(isPdf ? '/workspace/import-reference' : '/workspace/import-docx',
+                    { method: 'POST', credentials: 'same-origin', body: fd });
+                const text = await resp.text();
+                if (!resp.ok) { res.innerHTML = '<div class="panel-hint" style="color:#f38ba8">' + text + '</div>'; return; }
+                if (isPdf) {
+                    const data = JSON.parse(text);
+                    loadTree();
+                    res.innerHTML = '<div class="panel-hint">✓ Riferimento salvato: ' + data.path
+                        + ' — <a href="' + data.url + '" target="_blank" style="color:#89b4fa">apri</a></div>';
+                } else {
+                    const data = JSON.parse(text);
+                    await loadTree();
+                    await openFile(data.template);
+                    closeImport();
+                    showStatus('✓ Importato ' + data.template);
+                }
+            } catch (e) {
+                res.innerHTML = '<div class="panel-hint" style="color:#f38ba8">Errore: ' + e.message + '</div>';
+            }
+        }
+
+        async function askAssistant() {
+            const instruction = document.getElementById('assist-instruction').value.trim();
+            if (!instruction) return;
+            flushActive();
+            const res = document.getElementById('assist-result');
+            res.innerHTML = '<div class="panel-hint">🤔 L\'assistente sta lavorando…</div>';
+            try {
+                const resp = await fetch('/llm/assist', { method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ workspace: workspacePath, document: assistantDoc + '.html',
+                        instruction, dirtyFiles: dirtyFilesMap(), llm: getLlmConfig() }) });
+                const text = await resp.text();
+                if (!resp.ok) { res.innerHTML = '<div class="panel-hint" style="color:#f38ba8">' + text + '</div>'; return; }
+                const data = JSON.parse(text);
+                assistProposals = data.modifiche;
+                res.innerHTML = '';
+                const sp = document.createElement('div');
+                sp.className = 'assist-spiegazione';
+                sp.textContent = data.spiegazione || 'Modifica proposta';
+                res.appendChild(sp);
+                for (const p of assistProposals) {
+                    const wrap = document.createElement('div');
+                    wrap.className = 'assist-file';
+                    const path = document.createElement('div');
+                    path.className = 'path';
+                    path.textContent = '📝 ' + p.path;
+                    let old = null;
+                    if (openTabs.includes(p.path)) old = buffers.get(p.path);
+                    else {
+                        try {
+                            old = await (await fetch('/workspace/file?workspace=' + encodeURIComponent(workspacePath)
+                                + '&file=' + encodeURIComponent(p.path), { credentials: 'same-origin' })).text();
+                        } catch (e) { old = ''; }
+                    }
+                    const diffEl = buildDiffEl(old != null ? old : '', p.contenuto);
+                    const apply = document.createElement('div');
+                    apply.className = 'assist-apply';
+                    const btn = document.createElement('button');
+                    btn.textContent = '✓ Applica al buffer';
+                    btn.addEventListener('click', () => applyEdit(p.path, p.contenuto));
+                    apply.appendChild(btn);
+                    wrap.append(path, diffEl, apply);
+                    res.appendChild(wrap);
+                }
+            } catch (e) {
+                res.innerHTML = '<div class="panel-hint" style="color:#f38ba8">Errore: ' + e.message + '</div>';
+            }
+        }
+
+        function buildDiffEl(oldText, newText) {
+            const el = document.createElement('div');
+            el.className = 'diff';
+            for (const row of diffLines(oldText, newText)) {
+                const line = document.createElement('div');
+                line.className = row.t === '+' ? 'd-add' : row.t === '-' ? 'd-del' : 'd-eq';
+                line.textContent = (row.t === '+' ? '+ ' : row.t === '-' ? '- ' : '  ') + row.x;
+                el.appendChild(line);
+            }
+            return el;
+        }
+
+        function diffLines(a, b) {
+            const A = a.split('\n'), B = b.split('\n');
+            const n = A.length, m = B.length;
+            const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+            for (let i = n - 1; i >= 0; i--) {
+                for (let j = m - 1; j >= 0; j--) {
+                    dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+                }
+            }
+            const rows = [];
+            let i = 0, j = 0;
+            while (i < n && j < m) {
+                if (A[i] === B[j]) { rows.push({ t: '=', x: A[i] }); i++; j++; }
+                else if (dp[i + 1][j] >= dp[i][j + 1]) { rows.push({ t: '-', x: A[i] }); i++; }
+                else { rows.push({ t: '+', x: B[j] }); j++; }
+            }
+            while (i < n) rows.push({ t: '-', x: A[i++] });
+            while (j < m) rows.push({ t: '+', x: B[j++] });
+            return rows;
+        }
+
+        function getLlmConfig() {
+            try {
+                const s = JSON.parse(localStorage.getItem('llm-settings') || '{}');
+                return (s.baseUrl && s.model) ? { baseUrl: s.baseUrl, apiKey: s.apiKey || '', model: s.model } : null;
+            } catch (e) { return null; }
+        }
+        function saveLlmSettings() {
+            const s = {
+                baseUrl: document.getElementById('llm-baseurl').value.trim(),
+                apiKey: document.getElementById('llm-apikey').value,
+                model: document.getElementById('llm-model').value.trim(),
+            };
+            localStorage.setItem('llm-settings', JSON.stringify(s));
+            updateAssistStatus();
+            showStatus('✓ Credenziali salvate in questo browser');
+        }
+        function loadLlmSettingsInputs() {
+            try {
+                const s = JSON.parse(localStorage.getItem('llm-settings') || '{}');
+                document.getElementById('llm-baseurl').value = s.baseUrl || '';
+                document.getElementById('llm-apikey').value = s.apiKey || '';
+                document.getElementById('llm-model').value = s.model || '';
+            } catch (e) { }
+        }
+        function updateAssistStatus() {
+            const cfg = getLlmConfig();
+            const el = document.getElementById('assist-status');
+            if (cfg) { el.textContent = '🤖 Modello utente: ' + cfg.model; el.style.color = '#a6e3a1'; return; }
+            fetch('/llm/status', { credentials: 'same-origin' }).then(r => r.json()).then(s => {
+                el.textContent = s.enabled ? '🤖 Modello: ' + s.model + ' (config. applicazione)'
+                    : '⚠️ Nessun servizio AI configurato (usa i campi sopra)';
+                el.style.color = s.enabled ? '#a6e3a1' : '#f9e2af';
+            }).catch(() => {});
+        }
+
+        async function applyEdit(path, content) {
+            await openFile(path);
+            view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content } });
+            showStatus('✓ Proposta applicata al buffer — salva quando vuoi');
         }
 
         // ====== AUTO-PREVIEW (debounce mentre l'anteprima è aperta) ======
@@ -587,7 +1916,42 @@
         });
 
         // ====== INIT ======
-        if (initEditor()) loadTree();
+        document.getElementById('btn-new-file').addEventListener('click', () => startCreate('file'));
+        document.getElementById('btn-new-dir').addEventListener('click', () => startCreate('dir'));
+        document.getElementById('btn-release-refresh').addEventListener('click', loadReleaseTree);
+        document.getElementById('btn-new-image').addEventListener('click', () => document.getElementById('image-file-input').click());
+        document.getElementById('image-file-input').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            e.target.value = '';
+            if (!file) return;
+            let folder = '';
+            if (selectedPath) folder = selectedIsDir ? selectedPath : parentDirOf(selectedPath);
+            if (!folder) folder = 'assets';
+            const fd = new FormData();
+            fd.append('workspace', workspacePath);
+            fd.append('folder', folder);
+            fd.append('file', file);
+            try {
+                let resp = await fetch('/workspace/upload-image', { method: 'POST', credentials: 'same-origin', body: fd });
+                if (resp.status === 409) {
+                    if (!confirm('Esiste già un\'immagine con questo nome. Sovrascriverla?\n' +
+                        'I template che la usano punteranno al nuovo file automaticamente.')) return;
+                    resp = await fetch('/workspace/upload-image?replace=true', { method: 'POST', credentials: 'same-origin', body: fd });
+                }
+                const text = await resp.text();
+                if (!resp.ok) { alert('Caricamento fallito:\n' + text); return; }
+                const data = JSON.parse(text);
+                await loadTree();
+                // se il tab immagine era già aperto, forza il ricaricamento (cache-bust)
+                const src = assetUrl(data.path) + (imageTabs.has(data.path) ? '&t=' + Date.now() : '');
+                imageTabs.set(data.path, src);
+                openImageTab(data.path, src);
+                showStatus((src.includes('&t=') ? '✓ Immagine sostituita: ' : '✓ Immagine caricata: ') + data.path);
+            } catch (err) {
+                alert('Caricamento fallito: ' + err.message);
+            }
+        });
+        if (initEditor()) { loadTree(); loadReleaseTree(); }
         /*]]>*/
     </script>
 </body>

@@ -24,28 +24,31 @@ class WorkspaceServiceTest {
     @TempDir
     Path ws;
 
+    /** Percorso dentro l'area di lavoro (snapshot/). */
+    private Path snap(String rel) { return ws.resolve("snapshot").resolve(rel); }
+
     @BeforeEach
     void setUp() throws IOException {
         // Struttura multi-tenant: root con STANDARD/ e CLIENTE_A/ (nessun .html direttamente in root)
-        Files.createDirectories(ws.resolve("STANDARD/include"));
-        Files.createDirectories(ws.resolve("CLIENTE_A/include"));
-        Files.createDirectories(ws.resolve("assets"));
+        Files.createDirectories(snap("STANDARD/include"));
+        Files.createDirectories(snap("CLIENTE_A/include"));
+        Files.createDirectories(snap("assets"));
 
         // Frammento condiviso cross-cartella
-        Files.writeString(ws.resolve("STANDARD/tabella-tariffe.html"),
+        Files.writeString(snap("STANDARD/tabella-tariffe.html"),
                 "<table th:fragment=\"tariffe\"><tr><td>TARIFFE</td></tr></table>");
 
         // CSS: uno STANDARD, uno del cliente
-        Files.writeString(ws.resolve("STANDARD/include/common.css"), "body { color: #111; }\n");
-        Files.writeString(ws.resolve("CLIENTE_A/include/common.css"), "h1 { color: #dc2626; }\n");
+        Files.writeString(snap("STANDARD/include/common.css"), "body { color: #111; }\n");
+        Files.writeString(snap("CLIENTE_A/include/common.css"), "h1 { color: #dc2626; }\n");
 
         // Header del cliente con immagine
-        Files.writeString(ws.resolve("CLIENTE_A/include/header.html"),
+        Files.writeString(snap("CLIENTE_A/include/header.html"),
                 "<header th:fragment=\"header\"><img src=\"assets/logo.png\" /></header>");
-        Files.write(ws.resolve("assets/logo.png"), new byte[] {(byte) 0x89, 'P', 'N', 'G'});
+        Files.write(snap("assets/logo.png"), new byte[] {(byte) 0x89, 'P', 'N', 'G'});
 
         // Template del cliente: 2 CSS (STANDARD + cliente) + frammento STANDARD + header con img
-        Files.writeString(ws.resolve("CLIENTE_A/preventivo.html"), """
+        Files.writeString(snap("CLIENTE_A/preventivo.html"), """
                 <html xmlns:th="http://www.thymeleaf.org">
                 <head>
                   <link rel="stylesheet" href="STANDARD/include/common.css" />
@@ -58,7 +61,7 @@ class WorkspaceServiceTest {
                 </body>
                 </html>
                 """);
-        Files.writeString(ws.resolve("CLIENTE_A/preventivo.json"), "{\"titolo\":\"Preventivo A\"}");
+        Files.writeString(snap("CLIENTE_A/preventivo.json"), "{\"titolo\":\"Preventivo A\"}");
     }
 
     // ===== Tree =====
@@ -79,7 +82,7 @@ class WorkspaceServiceTest {
 
     @Test
     void buildTreePutsDirectoriesFirstAndSortsAlphabetically() throws IOException {
-        Files.createDirectories(ws.resolve("AAA"));
+        Files.createDirectories(snap("AAA"));
         WorkspaceService.TreeNode root = service.buildTree(ws);
         List<String> names = root.children().stream().map(WorkspaceService.TreeNode::name).toList();
         assertTrue(names.indexOf("AAA") < names.indexOf("CLIENTE_A"), "le directory vengono prima");
@@ -92,15 +95,15 @@ class WorkspaceServiceTest {
     void isWorkspaceDirectoryIsRecursive() throws IOException {
         assertTrue(service.isWorkspaceDirectory(ws),
                 "la root può contenere solo cartelle: basta un .html in una sottocartella");
-        assertFalse(service.isWorkspaceDirectory(ws.resolve("assets")));
-        assertFalse(service.isWorkspaceDirectory(ws.resolve("non-esiste")));
+        assertFalse(service.isWorkspaceDirectory(snap("assets")));
+        assertFalse(service.isWorkspaceDirectory(snap("non-esiste")));
     }
 
     // ===== Render: include cross-cartella =====
 
     @Test
     void renderTemplateResolvesCrossFolderIncludes() {
-        String html = service.renderTemplate(ws, "CLIENTE_A/preventivo.html", "{\"titolo\":\"Bozza\"}");
+        String html = service.renderTemplate(ws.resolve("snapshot"), "CLIENTE_A/preventivo.html", "{\"titolo\":\"Bozza\"}");
         assertTrue(html.contains("TARIFFE"), "il frammento STANDARD risolve da un template CLIENTE_A");
         assertTrue(html.contains("Bozza"));
     }
@@ -153,7 +156,7 @@ class WorkspaceServiceTest {
 
     @Test
     void renderDocumentWithoutJsonFileStillRenders() throws IOException {
-        Files.delete(ws.resolve("CLIENTE_A/preventivo.json"));
+        Files.delete(snap("CLIENTE_A/preventivo.json"));
         String html = service.renderDocument(ws, "CLIENTE_A/preventivo.html", Map.of(), WorkspaceService.AssetTarget.PREVIEW);
         System.out.println("HTML>>>" + html + "<<<");
         assertTrue(html.contains("<h1></h1>"), "senza JSON th:text con variabile assente renderizza vuoto (per questo il json è obbligatorio per convenzione)");
@@ -164,7 +167,7 @@ class WorkspaceServiceTest {
     @Test
     void saveFileWritesContent() throws IOException {
         service.saveFile(ws, "CLIENTE_A/nuovo.html", "nuovo contenuto");
-        assertEquals("nuovo contenuto", Files.readString(ws.resolve("CLIENTE_A/nuovo.html")));
+        assertEquals("nuovo contenuto", Files.readString(snap("CLIENTE_A/nuovo.html")));
     }
 
     @Test

@@ -1,9 +1,0 @@
-{
-  "titolo": "Fattura standard #2026-001",
-  "cliente": "Cliente generico",
-  "data": "01/01/2026",
-  "righe": [
-    { "descrizione": "Consulenza", "quantita": 3, "prezzo": "€450.00" }
-  ],
-  "totale": "450.00"
-}

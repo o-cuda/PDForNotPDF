@@ -34,9 +34,13 @@ class ApiControllerTest {
     @TempDir
     Path ws;
 
+    /** Percorso dentro l'area di lavoro (snapshot/). */
+    private Path snap(String rel) { return ws.resolve("snapshot").resolve(rel); }
+
     @BeforeEach
     void setUp() throws IOException {
-        Files.writeString(ws.resolve("fattura.html"), """
+        Files.createDirectories(ws.resolve("snapshot"));
+        Files.writeString(snap("fattura.html"), """
                 <html xmlns:th="http://www.thymeleaf.org">
                 <body>
                   <div th:replace="~{includes/header :: header}"></div>
@@ -44,9 +48,9 @@ class ApiControllerTest {
                 </body>
                 </html>
                 """);
-        Files.writeString(ws.resolve("fattura.css"), "h1 { color: blue; }");
-        Files.createDirectories(ws.resolve("includes"));
-        Files.writeString(ws.resolve("includes/header.html"), "<div th:fragment=\"header\">HEADER</div>");
+        Files.writeString(snap("fattura.css"), "h1 { color: blue; }");
+        Files.createDirectories(snap("includes"));
+        Files.writeString(snap("includes/header.html"), "<div th:fragment=\"header\">HEADER</div>");
     }
 
     @Test

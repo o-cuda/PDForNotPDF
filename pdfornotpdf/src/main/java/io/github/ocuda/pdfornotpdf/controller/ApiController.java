@@ -1,6 +1,7 @@
 package io.github.ocuda.pdfornotpdf.controller;
 
 import io.github.ocuda.pdfornotpdf.service.PdfService;
+import io.github.ocuda.pdfornotpdf.service.ReleaseService;
 import io.github.ocuda.pdfornotpdf.service.WorkspaceService;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpHeaders;
@@ -19,16 +20,19 @@ public class ApiController {
 
     private final WorkspaceService workspaceService;
     private final PdfService pdfService;
+    private final ReleaseService releaseService;
 
-    public ApiController(WorkspaceService workspaceService, PdfService pdfService) {
+    public ApiController(WorkspaceService workspaceService, PdfService pdfService, ReleaseService releaseService) {
         this.workspaceService = workspaceService;
         this.pdfService = pdfService;
+        this.releaseService = releaseService;
     }
 
     @PostMapping("/generate")
     public ResponseEntity<?> generatePdf(
             @RequestParam String workspace,
             @RequestParam String template,
+            @RequestParam(required = false) Integer version,
             @RequestParam(required = false) String cssFile,
             @RequestBody(required = false) Map<String, Object> data) throws IOException {
 
@@ -36,10 +40,24 @@ public class ApiController {
             Path dir = Path.of(workspace);
             String jsonData = data != null ? new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(data) : "{}";
 
-            // Render completo (include, CSS linkati, immagini) + eventuale CSS extra da parametro
-            String html = workspaceService.renderDocument(dir, template, Map.of(), WorkspaceService.AssetTarget.PRINT);
+            // Se il documento è stato pubblicato, si serve lo SNAPSHOT (versione pinnata o attiva approvata);
+            // altrimenti fallback sul workspace (compatibilità con documenti mai pubblicati).
+            String document = template.replaceAll("(?i)\\.html$", "");
+            Path releaseFiles = releaseService.activeFilesDir(dir, document, version);
+            if (version != null && releaseFiles == null) {
+                return ResponseEntity.badRequest().contentType(MediaType.TEXT_PLAIN)
+                        .body(("Versione non trovata: " + document + " v" + version).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+
+            String html;
+            if (releaseFiles != null) {
+                html = workspaceService.renderTemplate(releaseFiles, template, jsonData);
+                html = workspaceService.inlineLinkedAssets(html, releaseFiles, Map.of(), WorkspaceService.AssetTarget.PRINT);
+            } else {
+                html = workspaceService.renderDocument(dir, template, Map.of(), WorkspaceService.AssetTarget.PRINT);
+            }
             String css = (cssFile != null && !cssFile.isBlank())
-                    ? workspaceService.readFile(dir.resolve(cssFile))
+                    ? workspaceService.readFile(workspaceService.snapshotRoot(dir).resolve(cssFile))
                     : null;
             html = workspaceService.injectCss(html, css);
 

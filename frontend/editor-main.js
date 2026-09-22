@@ -80,7 +80,8 @@ function languageFor(kind) {
 
 /**
  * Estensioni per un documento. onChange riceve l'update CM6 a ogni modifica;
- * onSave è invocato da Ctrl/Cmd+S quando il focus è dentro l'editor.
+ * onSave è invocato da Ctrl/Cmd+S quando il focus è dentro l'editor;
+ * readOnly blocca l'editing (usato per i file delle release pubblicate).
  */
 function extensionsFor(kind, handlers = {}) {
   const ext = [
@@ -92,6 +93,10 @@ function extensionsFor(kind, handlers = {}) {
   ];
   ext.push(languageFor(kind));
   if (kind === 'json') ext.push(linter(jsonParseLinter()));
+  if (handlers.readOnly) {
+    ext.push(EditorState.readOnly.of(true));
+    ext.push(EditorView.editable.of(false));
+  }
   if (handlers.onChange) ext.push(EditorView.updateListener.of((u) => { if (u.docChanged) handlers.onChange(u); }));
   ext.push(keymap.of([{ key: 'Mod-s', run: () => { if (handlers.onSave) handlers.onSave(); return true; } }]));
   return ext;

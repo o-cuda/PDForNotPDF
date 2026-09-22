@@ -3,8 +3,13 @@
  * Uso: node test-explorer.js   (app avviata su :8080)
  */
 const { chromium } = require('playwright');
+// reset del workspace demo (generato fuori dal repo dell'app)
+const WS = '/home/ocuda/workspace/stampe-demo';
+const { execSync } = require('child_process');
+execSync(`python3 ${__dirname}/tools/generate-demo-workspace.py ${WS}`);
 
-const WS = '/home/ocuda/workspace/PDForNotPDF/test-workspace';
+
+
 let failures = 0;
 function check(name, ok) { console.log((ok ? '✅' : '❌') + ' ' + name); if (!ok) failures++; }
 
@@ -43,10 +48,12 @@ function check(name, ok) { console.log((ok ? '✅' : '❌') + ' ' + name); if (!
   check('Editor: contiene i 2 <link> ai CSS', (doc.match(/<link[^>]*stylesheet/g) || []).length === 2);
   check('Editor: frammento cross-cartella STANDARD', doc.includes('~{STANDARD/tabella-tariffe :: tariffe}'));
 
-  // Immagini nell'Explorer: non apribili
+  // Immagini nell'Explorer: apre il viewer (sola visualizzazione, niente editor)
   await page.locator('.tree-file[title*="logo-cliente-a.png"]').click();
   await page.waitForTimeout(300);
-  check('Immagine non apre tab', await page.locator('.tab', { hasText: 'logo-cliente-a.png' }).count() === 0);
+  check('Immagine apre viewer in tab', await page.locator('.tab', { hasText: 'logo-cliente-a.png' }).count() === 1);
+  check('Viewer immagine visibile', await page.locator('#image-host img').count() === 1
+      && await page.locator('#image-host').isVisible());
 
   // Multi-tab
   await page.locator('.tree-file[title="CLIENTE_A/fattura.json"]').click();

@@ -1,0 +1,26 @@
+# Gitea per il flusso di approvazione dei template (PR: candidata → main).
+# Licenza Gitea: MIT. Dati in volume denominato (backup = volume o copia di /data).
+#
+# Avvio:      docker compose -f docker/gitea/docker-compose.yml up -d
+# Setup:      ./docker/gitea/setup-gitea.sh   (crea utente admin + repo stampe-releases)
+# UI:         http://localhost:3000
+services:
+  gitea:
+    image: gitea/gitea:1.22
+    container_name: pdforNotPdf-gitea
+    restart: unless-stopped
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - GITEA__server__HTTP_PORT=3000
+      - GITEA__server__ROOT_URL=http://localhost:3000/
+      - GITEA__security__INSTALL_LOCK=true
+      - GITEA__service__DISABLE_REGISTRATION=true
+      - GITEA__service__SHOW_REGISTRATION_BUTTON=false
+    volumes:
+      - gitea-data:/data
+    ports:
+      - "3000:3000"
+
+volumes:
+  gitea-data:

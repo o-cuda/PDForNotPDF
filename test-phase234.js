@@ -4,9 +4,11 @@
  * Uso: node test-phase234.js   (app avviata su :8080)
  */
 const { chromium } = require('playwright');
+// reset del workspace demo (generato fuori dal repo dell'app)
+const WS = '/home/ocuda/workspace/stampe-demo';
 const { execSync } = require('child_process');
+execSync(`python3 ${__dirname}/tools/generate-demo-workspace.py ${WS}`);
 
-const WS = '/home/ocuda/workspace/PDForNotPDF/test-workspace';
 let failures = 0;
 function check(name, ok) { console.log((ok ? '✅' : '❌') + ' ' + name); if (!ok) failures++; }
 async function setEditorContent(page, text) {

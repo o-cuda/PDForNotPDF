@@ -22,3 +22,6 @@ ARCHITECTURE.md
 .vscode/
 .DS_Store
 *.iml
+
+# Credenziali locali (mai committare)
+docker/gitea/.credentials
