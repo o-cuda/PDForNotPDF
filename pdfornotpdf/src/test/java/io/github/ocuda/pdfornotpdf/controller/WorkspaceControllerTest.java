@@ -1,5 +1,7 @@
 package io.github.ocuda.pdfornotpdf.controller;
 
+import io.github.ocuda.pdfornotpdf.service.WorkspacePaths;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -18,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -144,6 +147,8 @@ class WorkspaceControllerTest {
 
     @Test
     void saveFileWritesToDisk() throws Exception {
+        // con B4 il salvataggio richiede il file esistente (la creazione passa da /workspace/node)
+        Files.writeString(snap("CLIENTE_A/nuovo.html"), "");
         mockMvc.perform(post("/workspace/file")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"workspace\":\"" + ws + "\",\"file\":\"CLIENTE_A/nuovo.html\",\"content\":\"ciao\"}"))
@@ -333,6 +338,32 @@ class WorkspaceControllerTest {
         assertTrue(Files.exists(snap("assets/banner.webp")));
     }
 
+    // ===== Upload immagini: guardie traversal/segmenti nascosti (S5/R6, T3) =====
+
+    @Test
+    void uploadImageRejectsTraversalAndHiddenFolders() throws Exception {
+        var part = new org.springframework.mock.web.MockMultipartFile("file", "fuga.png", "image/png", new byte[]{1, 2, 3});
+
+        // traversal fuori dallo snapshot
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .multipart("/workspace/upload-image").file(part)
+                        .param("workspace", ws.toString()).param("folder", "../evil"))
+                .andExpect(status().isBadRequest());
+        // segmento nascosto intermedio (prima passava: S5)
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .multipart("/workspace/upload-image").file(part)
+                        .param("workspace", ws.toString()).param("folder", "assets/.git"))
+                .andExpect(status().isBadRequest());
+        // segmento dot intermedio
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .multipart("/workspace/upload-image").file(part)
+                        .param("workspace", ws.toString()).param("folder", "a/./b"))
+                .andExpect(status().isBadRequest());
+        // nulla deve essere scritto
+        assertFalse(Files.exists(snap("../evil/fuga.png")));
+        assertFalse(Files.exists(snap("assets/.git/fuga.png")));
+    }
+
     // ===== Delete =====
 
     @Test
@@ -342,6 +373,19 @@ class WorkspaceControllerTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.referencedBy[0]").value("CLIENTE_A/preventivo.html"));
         assertTrue(Files.exists(snap("STANDARD/include/common.css")), "file referenziato NON cancellato");
+    }
+
+    // ===== Delete: path traversal (T4) =====
+
+    @Test
+    void deleteRejectsPathTraversal() throws Exception {
+        mockMvc.perform(post("/workspace/delete").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workspace\":\"" + ws + "\",\"path\":\"../fuga.html\"}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/workspace/delete").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workspace\":\"" + ws + "\",\"path\":\"a/../../fuga.html\"}"))
+                .andExpect(status().isBadRequest());
+        assertFalse(Files.exists(ws.resolve("fuga.html")), "nulla scritto/cancellato fuori dallo snapshot");
     }
 
     @Test
@@ -470,9 +514,10 @@ class WorkspaceControllerTest {
         mockMvc.perform(post("/workspace/rename").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"workspace\":\"" + ws + "\",\"from\":\"../fuga.html\",\"to\":\"x.html\"}"))
                 .andExpect(status().isBadRequest());
+        // con le eccezioni tipizzate (R2) una sorgente inesistente è una 404, non una 400 generica
         mockMvc.perform(post("/workspace/rename").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"workspace\":\"" + ws + "\",\"from\":\"assente.html\",\"to\":\"x.html\"}"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isNotFound());
     }
 
     // ===== Import DOCX con scaffold (difetto: template importato senza involucro HTML) =====
@@ -507,11 +552,21 @@ class WorkspaceControllerTest {
 
     @Test
     void importDocxCreatesMissingDestinationFolder() throws Exception {
+        // PNG minimale valido (1x1) per verificare che gli asset seguano la cartella
+        byte[] png;
+        var img = new java.awt.image.BufferedImage(1, 1, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        try (var bos = new java.io.ByteArrayOutputStream()) {
+            javax.imageio.ImageIO.write(img, "png", bos);
+            png = bos.toByteArray();
+        }
         byte[] docx;
         try (var bos = new java.io.ByteArrayOutputStream();
              var doc = new org.apache.poi.xwpf.usermodel.XWPFDocument()) {
             var p = doc.createParagraph();
             p.createRun().setText("Carta intestata");
+            p.createRun().addPicture(new java.io.ByteArrayInputStream(png),
+                    org.apache.poi.xwpf.usermodel.Document.PICTURE_TYPE_PNG, "logo.png",
+                    org.apache.poi.util.Units.toEMU(20), org.apache.poi.util.Units.toEMU(20));
             doc.write(bos);
             docx = bos.toByteArray();
         }
@@ -524,8 +579,279 @@ class WorkspaceControllerTest {
                         .param("workspace", ws.toString())
                         .param("folder", "ALBA"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.template").value("ALBA/carta-intestata-alba.html"));
+                .andExpect(jsonPath("$.template").value("ALBA/carta-intestata-alba.html"))
+                .andExpect(jsonPath("$.assets[0]").value(
+                        org.hamcrest.Matchers.startsWith("ALBA/assets/import/carta-intestata-alba/")));
         assertTrue(Files.exists(snap("ALBA/carta-intestata-alba.html")),
                 "la cartella di destinazione inesistente viene creata");
+        assertTrue(Files.exists(snap("ALBA/assets/import/carta-intestata-alba")),
+                "gli asset finiscono sotto la cartella cliente, non nella root");
+        String html = Files.readString(snap("ALBA/carta-intestata-alba.html"));
+        assertTrue(html.contains("src=\"ALBA/assets/import/carta-intestata-alba/"),
+                "gli <img src> puntano agli asset dentro la cartella");
+    }
+
+    // ===== Re-import DOCX (B3, T6): sovrascrittura solo con conferma =====
+
+    @Test
+    void importDocxReimportRequiresOverwriteConfirmation() throws Exception {
+        byte[] docx;
+        try (var bos = new java.io.ByteArrayOutputStream();
+             var doc = new org.apache.poi.xwpf.usermodel.XWPFDocument()) {
+            doc.createParagraph().createRun().setText("Prima versione");
+            doc.write(bos);
+            docx = bos.toByteArray();
+        }
+        var part = new org.springframework.mock.web.MockMultipartFile("file", "Atto.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document", docx);
+        var mpb = org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart("/workspace/import-docx")
+                .file(part).param("workspace", ws.toString());
+
+        // prima import → 200
+        mockMvc.perform(mpb).andExpect(status().isOk());
+        String first = Files.readString(snap("atto.html"));
+        Path assetDir = snap("assets/import/atto");
+        long assetPrima = java.nio.file.Files.exists(assetDir)
+                ? java.util.stream.Stream.of(assetDir.toFile()).flatMap(d -> java.util.Arrays.stream(d.listFiles())).count() : 0;
+        // re-import senza conferma → 409 (prima sovrascriveva silenziosamente)
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .multipart("/workspace/import-docx")
+                        .file(new org.springframework.mock.web.MockMultipartFile("file", "Atto.docx",
+                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document", docx))
+                        .param("workspace", ws.toString()))
+                .andExpect(status().isConflict());
+        assertEquals(first, Files.readString(snap("atto.html")), "senza overwrite il file non è toccato");
+        long assetDopo = java.nio.file.Files.exists(assetDir)
+                ? java.util.Arrays.stream(assetDir.toFile().listFiles()).count() : 0;
+        assertEquals(assetPrima, assetDopo, "B3: il 409 non crea né tocca asset (nessun orfano)");
+        // re-import con overwrite=true → 200 e contenuto aggiornato
+        try (var bos = new java.io.ByteArrayOutputStream();
+             var doc = new org.apache.poi.xwpf.usermodel.XWPFDocument()) {
+            doc.createParagraph().createRun().setText("Seconda versione");
+            doc.write(bos);
+            docx = bos.toByteArray();
+        }
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .multipart("/workspace/import-docx")
+                        .file(new org.springframework.mock.web.MockMultipartFile("file", "Atto.docx",
+                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document", docx))
+                        .param("workspace", ws.toString())
+                        .param("overwrite", "true"))
+                .andExpect(status().isOk());
+        assertTrue(Files.readString(snap("atto.html")).contains("Seconda versione"), "sovrascritto con la nuova versione");
+    }
+
+    // ===== Release-asset HTTP (T2): mime, non-immagine, traversal =====
+
+    @Test
+    void releaseAssetServesOnlyImagesInsideRelease() throws Exception {
+        byte[] png = new byte[]{(byte) 0x89, 'P', 'N', 'G', 1, 2, 3};
+        Files.createDirectories(snap("x"));
+        Path rel = ws.resolve("release/CLIENTE_A/fattura/v1/files/assets/logo.png");
+        Files.createDirectories(rel.getParent());
+        Files.write(rel, png);
+        Path relHtml = ws.resolve("release/CLIENTE_A/fattura/v1/files/CLIENTE_A/fattura.html");
+        Files.createDirectories(relHtml.getParent());
+        Files.writeString(relHtml, "<html></html>");
+
+        // immagine valida → 200 image/png
+        mockMvc.perform(get("/workspace/release-asset")
+                        .param("workspace", ws.toString())
+                        .param("path", "CLIENTE_A/fattura/v1/files/assets/logo.png"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.valueOf("image/png")))
+                .andExpect(content().bytes(png));
+        // non-immagine → 400
+        mockMvc.perform(get("/workspace/release-asset")
+                        .param("workspace", ws.toString())
+                        .param("path", "CLIENTE_A/fattura/v1/files/CLIENTE_A/fattura.html"))
+                .andExpect(status().isBadRequest());
+        // traversal fuori dalla release → 400
+        mockMvc.perform(get("/workspace/release-asset")
+                        .param("workspace", ws.toString())
+                        .param("path", "CLIENTE_A/fattura/v1/files/../../../segreto.png"))
+                .andExpect(status().isBadRequest());
+    }
+
+    // ===== Fase 4: candidates endpoint, S3 (CSP su asset), B4 (save su file sparito) =====
+
+    @Test
+    void candidatesReturnsEmptyListWithoutGitRepo() throws Exception {
+        mockMvc.perform(get("/release/candidates").param("workspace", ws.toString()))
+                .andExpect(status().isOk())
+                .andExpect(content().json("[]"));
+    }
+
+    @Test
+    void assetServesWithCspSandboxHeader() throws Exception {
+        mockMvc.perform(get("/workspace/asset")
+                        .param("workspace", ws.toString())
+                        .param("file", "assets/logo.png"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Security-Policy", "sandbox"))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"));
+    }
+
+    @Test
+    void saveToVanishedFileReturns409NotSilentRecreate() throws Exception {
+        mockMvc.perform(post("/workspace/file").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workspace\":\"" + ws + "\",\"file\":\"CLIENTE_A/sparito.html\",\"content\":\"x\"}"))
+                .andExpect(status().isConflict());
+        assertFalse(Files.exists(snap("CLIENTE_A/sparito.html")),
+                "un file cancellato da un altro utente non viene resuscitato dal salvataggio (B4)");
+    }
+
+    @Test
+    void optimisticLockingNowActuallyFiresOnDiskConflict() throws Exception {
+        // FIX fase 4: i pre-check risolvevano contro la root (mai attivi) invece che contro snapshot/
+        // WP6/P1: il confronto viaggia come sha256, non come intero contenuto
+        Files.writeString(snap("CLIENTE_A/conflitto.html"), "versione-su-disco");
+        String hashSuDisco = WorkspacePaths.sha256Hex("versione-su-disco".getBytes(StandardCharsets.UTF_8));
+        mockMvc.perform(post("/workspace/file").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workspace\":\"" + ws + "\",\"file\":\"CLIENTE_A/conflitto.html\","
+                                + "\"content\":\"mia versione\",\"expectedSha256\":\"abcd\"}"))
+                .andExpect(status().isConflict());
+        assertEquals("versione-su-disco", Files.readString(snap("CLIENTE_A/conflitto.html")),
+                "il disco non viene sovrascritto in conflitto");
+        // e con l'hash corretto il salvataggio passa
+        mockMvc.perform(post("/workspace/file").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workspace\":\"" + ws + "\",\"file\":\"CLIENTE_A/conflitto.html\","
+                                + "\"content\":\"mia versione\",\"expectedSha256\":\"" + hashSuDisco + "\"}"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void saveForceBypassesSha256Check() throws Exception {
+        // T20 (WP6): senza expectedSha256 (force dalla UI dopo conferma) si sovrascrive comunque
+        Files.writeString(snap("CLIENTE_A/force.html"), "vecchio");
+        mockMvc.perform(post("/workspace/file").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workspace\":\"" + ws + "\",\"file\":\"CLIENTE_A/force.html\",\"content\":\"nuovo\"}"))
+                .andExpect(status().isOk());
+        assertEquals("nuovo", Files.readString(snap("CLIENTE_A/force.html")));
+    }
+
+    // ===== Audit 05: T12 (folder traversal in import-docx) + T17 (document traversal) + B6 =====
+
+    @Test
+    void importDocxRejectsFolderTraversalAndWritesNothing() throws Exception {
+        byte[] docx;
+        try (var bos = new java.io.ByteArrayOutputStream();
+             var doc = new org.apache.poi.xwpf.usermodel.XWPFDocument()) {
+            doc.createParagraph().createRun().setText("traversal");
+            doc.write(bos);
+            docx = bos.toByteArray();
+        }
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .multipart("/workspace/import-docx")
+                        .file(new org.springframework.mock.web.MockMultipartFile("file", "Atto.docx",
+                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document", docx))
+                        .param("workspace", ws.toString())
+                        .param("folder", "../../../pwn"))
+                .andExpect(status().isBadRequest());
+        assertFalse(Files.exists(ws.resolve("../pwn")), "nulla scritto fuori dal workspace (C2)");
+        assertFalse(Files.exists(snap("../pwn")));
+    }
+
+    @Test
+    void listAndActiveFilesRejectDocumentTraversal() throws Exception {
+        // T17 (audit 05 / B5): document arriva da request — deve restare dentro release/
+        mockMvc.perform(get("/release/list")
+                        .param("workspace", ws.toString())
+                        .param("document", "../snapshot/CLIENTE_A"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/release/list")
+                        .param("workspace", ws.toString())
+                        .param("document", "../../etc"))
+                .andExpect(status().isBadRequest());
+    }
+
+
+    // ===== Audit 05: T15 (import-reference, endpoint senza copertura) + T16 (release preview/print HTTP) =====
+
+    @Test
+    void importReferenceSavesPdfAndSanitizesName() throws Exception {
+        var part = new org.springframework.mock.web.MockMultipartFile("file", "Capitolo 1 (bozza).pdf",
+                "application/pdf", "%PDF-1.4 riferimento".getBytes());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .multipart("/workspace/import-reference")
+                        .file(part)
+                        .param("workspace", ws.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.path").value("assets/reference/Capitolo_1__bozza_.pdf"));
+        assertTrue(Files.exists(snap("assets/reference/Capitolo_1__bozza_.pdf")));
+    }
+
+    @Test
+    void importReferenceRejectsInvalidNames() throws Exception {
+        // B6: il nome ".." sopravviveva alla sanitizzazione charset
+        var part = new org.springframework.mock.web.MockMultipartFile("file", "..",
+                "application/pdf", "%PDF".getBytes());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .multipart("/workspace/import-reference")
+                        .file(part)
+                        .param("workspace", ws.toString()))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void releasePrintAndServeViaHttp() throws Exception {
+        // T16 (audit 05): /release/print e /release/preview al livello HTTP
+        Path docFiles = ws.resolve("release/DEMO/atto/v1/files");
+        Files.createDirectories(docFiles.resolve("DEMO"));
+        Files.writeString(docFiles.resolve("DEMO/atto.html"),
+                "<html><head><title>t</title></head><body><h1>DEMO PRINT</h1></body></html>");
+        Files.writeString(ws.resolve("release/DEMO/atto/index.json"),
+                "{\"document\":\"DEMO/atto\",\"active\":1,\"versions\":[{\"version\":1,"
+                        + "\"status\":\"approved\",\"effectiveFrom\":\"2020-01-01\"}]}");
+
+        byte[] pdf = mockMvc.perform(post("/release/print").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workspace\":\"" + ws + "\",\"document\":\"DEMO/atto\",\"version\":1,\"template\":\"DEMO/atto.html\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_PDF))
+                .andReturn().getResponse().getContentAsByteArray();
+        assertTrue(pdf.length > 500, "PDF di stampa della release");
+
+        mockMvc.perform(post("/release/preview?version=1").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workspace\":\"" + ws + "\",\"template\":\"DEMO/atto.html\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("DEMO PRINT")));
+    }
+
+    // ===== Robustezza B1: cartelle illeggibili non producono 500 (T5) =====
+
+    @Test
+    void loadWorkspaceWithUnreadableSubdirectoryStillLoads() throws Exception {
+        Path locked = snap("lockdir");
+        Files.createDirectories(locked);
+        Files.writeString(snap("doc.html"), "<html><body>doc</body></html>");
+        assumeTrue(locked.toFile().setReadable(false) && locked.toFile().setExecutable(false),
+                "permessi POSIX non modificabili (utente root?)");
+        try {
+            mockMvc.perform(post("/workspace/load").param("path", ws.toString()))
+                    .andExpect(status().is3xxRedirection());
+            mockMvc.perform(get("/workspace/tree").param("workspace", ws.toString()))
+                    .andExpect(status().isOk());
+        } finally {
+            locked.toFile().setReadable(true);
+            locked.toFile().setExecutable(true);
+        }
+    }
+
+    @Test
+    void loaderOnDirectoryWithUnreadableContentShowsCleanErrorNot500() throws Exception {
+        Path other = Files.createTempDirectory("b1-loader");
+        Path locked = other.resolve("hidden");
+        Files.createDirectories(locked);
+        assumeTrue(locked.toFile().setReadable(false) && locked.toFile().setExecutable(false),
+                "permessi POSIX non modificabili (utente root?)");
+        try {
+            // atteso: messaggio pulito di loader (200), non 500
+            mockMvc.perform(post("/workspace/load").param("path", other.toString()))
+                    .andExpect(status().isOk());
+        } finally {
+            locked.toFile().setReadable(true);
+            locked.toFile().setExecutable(true);
+            org.assertj.core.util.Files.delete(other.toFile());
+        }
     }
 }

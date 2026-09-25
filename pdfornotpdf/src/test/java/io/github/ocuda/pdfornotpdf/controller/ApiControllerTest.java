@@ -89,4 +89,17 @@ class ApiControllerTest {
                         .content("{}"))
                 .andExpect(status().isBadRequest());
     }
+
+    // ===== T11 (audit 05 / C1): cssFile traversal → 400, mai contenuto esterno nel PDF =====
+
+    @Test
+    void generateRejectsCssFileOutsideSnapshot() throws Exception {
+        mockMvc.perform(post("/api/generate")
+                        .param("workspace", ws.toString())
+                        .param("template", "fattura.html")
+                        .param("cssFile", "../../segreto.css")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+    }
 }

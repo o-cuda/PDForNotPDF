@@ -2,34 +2,16 @@
  * E2E: Explorer file ops — nuovo file/cartella (scaffold), menu contestuale,
  * rinomina con dialogo proposta riferimenti, F2. Uso: node /tmp/test-fileops.js (app su :8080)
  */
-const { chromium } = require('playwright');
+const { makeCheck, rightClick, launch } = require('./test-utils');
 const { execSync } = require('child_process');
 const fs = require('fs');
-execSync(`python3 /home/ocuda/workspace/PDForNotPDF/tools/generate-demo-workspace.py /home/ocuda/workspace/stampe-demo`);
+execSync(`python3 ${__dirname}/tools/generate-demo-workspace.py ${'/home/ocuda/workspace/stampe-demo'}`);
 const WS = '/home/ocuda/workspace/stampe-demo';
-let failures = 0;
-// i confirm del browser (es. sostituzione immagine) vengono accettati automaticamente
-function check(name, ok) { console.log((ok ? '✅ ' : '❌ ') + name); if (!ok) failures++; }
-
-// right-click robusto: scrolla prima il nodo in vista e attende il flush dell'evento scroll,
-// così l'apertura del menu non viene chiusa dallo scroll pre-click
-async function rightClick(page, locator) {
-  await page.waitForTimeout(300); // lascia finire eventuali re-render debounced
-  for (let i = 0; i < 3; i++) {
-    try { await locator.scrollIntoViewIfNeeded({ timeout: 5000 }); break; }
-    catch (e) { await page.waitForTimeout(500); }
-  }
-  await page.waitForTimeout(150);
-  await locator.click({ button: 'right' });
-}
+// i confirm del browser (es. sostituzione immagine) vengono accettati automaticamente da launch()
+const { check, state } = makeCheck();
 
 (async () => {
-  const browser = await chromium.launch();
-  const page = await browser.newPage();
-  page.on('dialog', async d => { await d.accept(); });
-  const errors = [];
-  page.on('pageerror', e => errors.push('pageerror: ' + e.message));
-  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  const { browser, page, errors } = await launch();
 
   await page.goto('http://localhost:8080/');
   await page.fill('input[name="path"]', WS);
@@ -156,6 +138,39 @@ async function rightClick(page, locator) {
   await page.waitForTimeout(400);
   check('Delete cartella vuota', !fs.existsSync(WS + '/snapshot/CLIENTE_A/sottocartella'));
 
+  // 6b. T8 (audit 03): delete di una cartella NON vuota via UI → errore, la cartella resta
+  await page.locator('details[data-path="CLIENTE_A"] > summary').click();
+  await page.click('#btn-new-dir');
+  await page.waitForSelector('.tree-edit-input');
+  await page.keyboard.type('piena');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(600);
+  await rightClick(page, page.locator('details[data-path="CLIENTE_A/piena"] > summary'));
+  await page.locator('.ctx-item', { hasText: 'Nuovo file' }).click();
+  await page.waitForSelector('.tree-edit-input');
+  await page.keyboard.type('nota');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(800);
+  check('T8: setup (nota.html dentro piena/)', fs.existsSync(WS + '/snapshot/CLIENTE_A/piena/nota.html'));
+  await rightClick(page, page.locator('details[data-path="CLIENTE_A/piena"] > summary'));
+  await page.locator('.ctx-item', { hasText: 'Elimina' }).click();
+  await page.waitForSelector('#delete-overlay.open');
+  await page.click('#delete-confirm');
+  await page.waitForTimeout(600);
+  check('T8: delete cartella non vuota rifiutato', fs.existsSync(WS + '/snapshot/CLIENTE_A/piena'));
+  // pulizia: svuota la cartella, poi cancellala (ripristina lo stato demo)
+  await rightClick(page, page.locator('.tree-file[title="CLIENTE_A/piena/nota.html"]'));
+  await page.locator('.ctx-item', { hasText: 'Elimina' }).click();
+  await page.waitForSelector('#delete-overlay.open');
+  await page.click('#delete-confirm');
+  await page.waitForTimeout(600);
+  await rightClick(page, page.locator('details[data-path="CLIENTE_A/piena"] > summary'));
+  await page.locator('.ctx-item', { hasText: 'Elimina' }).click();
+  await page.waitForSelector('#delete-overlay.open');
+  await page.click('#delete-confirm');
+  await page.waitForTimeout(600);
+  check('T8: pulizia completata', !fs.existsSync(WS + '/snapshot/CLIENTE_A/piena'));
+
   // 7. remap tab: apri fattura, rinominala, il tab segue
   await page.locator('.tree-file[title="CLIENTE_A/fattura.html"]').click();
   await page.waitForSelector('.tab.active');
@@ -168,10 +183,10 @@ async function rightClick(page, locator) {
   await page.waitForTimeout(600);
   check('Tab remappato dopo rinomina', (await page.locator('.tab.active').innerText()).includes('fattura-2026.html'));
 
-  const realErrors = errors.filter(e => !e.includes('409')); // il 409 del test duplicato è atteso
+  const realErrors = errors.filter(e => !e.includes('409') && !e.includes('status of 400')); // 409 duplicato e 400 T8 sono attesi
   check('Nessun errore JS', realErrors.length === 0);
   if (realErrors.length) console.log(realErrors.join('\n'));
   await browser.close();
-  console.log(failures ? `\n${failures} fallimenti` : '\nTutti i check passati');
-  process.exit(failures ? 1 : 0);
+  console.log(state.failures ? `\n${state.failures} fallimenti` : '\nTutti i check passati');
+  process.exit(state.failures ? 1 : 0);
 })();

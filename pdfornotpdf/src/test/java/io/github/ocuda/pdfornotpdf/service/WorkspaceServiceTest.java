@@ -172,8 +172,8 @@ class WorkspaceServiceTest {
 
     @Test
     void saveFileRejectsPathTraversal() {
-        assertThrows(IOException.class, () -> service.saveFile(ws, "../evil.html", "x"));
-        assertThrows(IOException.class, () -> service.saveFile(ws, "a/../../evil.html", "x"));
+        assertThrows(IllegalArgumentException.class, () -> service.saveFile(ws, "../evil.html", "x"));
+        assertThrows(IllegalArgumentException.class, () -> service.saveFile(ws, "a/../../evil.html", "x"));
     }
 
     // ===== Immagini =====
@@ -182,8 +182,78 @@ class WorkspaceServiceTest {
     void readImageServesOnlyImagesInsideWorkspace() throws IOException {
         byte[] logo = service.readImage(ws, "assets/logo.png");
         assertEquals(0x89, logo[0] & 0xFF, "magic byte PNG");
-        assertThrows(IOException.class, () -> service.readImage(ws, "../fuori.png"));
+        assertThrows(IllegalArgumentException.class, () -> service.readImage(ws, "../fuori.png"));
         assertThrows(IOException.class, () -> service.readImage(ws, "CLIENTE_A/preventivo.html"),
                 "un .html non è un'immagine servibile");
+    }
+
+    // ===== Guardia S1: il render non incorpora file fuori dallo snapshot (T10) =====
+
+    @Test
+    void renderDoesNotInlineCssOutsideSnapshot() throws IOException {
+        Files.writeString(ws.resolve("segreto.css"), "/* TOPSECRET-CSS */");
+        Files.writeString(snap("CLIENTE_A/leak.html"),
+                "<html><head><link rel=\"stylesheet\" href=\"../segreto.css\" /></head>"
+                        + "<body><p>x</p></body></html>");
+        String html = service.renderDocument(ws, "CLIENTE_A/leak.html", Map.of(), WorkspaceService.AssetTarget.PRINT);
+        assertFalse(html.contains("TOPSECRET-CSS"), "un CSS ../ fuori dallo snapshot non viene incorporato");
+        assertTrue(html.contains("CSS non trovato"), "il riferimento fuggito è segnalato come CSS non trovato");
+    }
+
+    @Test
+    void renderDoesNotEmbedImagesOutsideSnapshotAsDataUri() throws IOException {
+        Files.write(ws.resolve("segreto.png"), new byte[]{1, 2, 3, 4});
+        Files.writeString(snap("CLIENTE_A/leak-img.html"),
+                "<html><body><img src=\"../segreto.png\" /></body></html>");
+        String html = service.renderDocument(ws, "CLIENTE_A/leak-img.html", Map.of(), WorkspaceService.AssetTarget.PRINT);
+        assertFalse(html.contains("data:image"), "un'immagine ../ fuori dallo snapshot non diventa data-URI");
+    }
+
+    @Test
+    void staysInsideRootRejectsEscapingPaths() {
+        assertTrue(WorkspacePaths.staysInside("CLIENTE_A/fattura.html"));
+        assertTrue(WorkspacePaths.staysInside("a/../b.png"), "..  che rientra è ok");
+        assertFalse(WorkspacePaths.staysInside("../segreto.css"));
+        assertFalse(WorkspacePaths.staysInside("a/../../segreto.css"));
+        assertFalse(WorkspacePaths.staysInside("/etc/passwd"));
+        assertFalse(WorkspacePaths.staysInside(""));
+    }
+
+    // ===== Boundary check header/header-v2 (T1): niente finto positivo sul prefisso condiviso =====
+
+    @Test
+    void scanReferencesDistinguishesHeaderFromHeaderV2() throws IOException {
+        Files.writeString(snap("STANDARD/header.html"),
+                "<div th:fragment=\"h\">header</div>");
+        Files.writeString(snap("STANDARD/header-v2.html"),
+                "<div th:fragment=\"h\">header v2</div>");
+        Files.writeString(snap("usa.html"),
+                "<html><body><div th:replace=\"~{STANDARD/header :: h}\"></div></body></html>");
+        Files.writeString(snap("usa-v2.html"),
+                "<html><body><div th:replace=\"~{STANDARD/header-v2 :: h}\"></div></body></html>");
+
+        // rinomina di STANDARD/header.html: SOLO usa.html è referenziante
+        var hitsh = service.scanReferences(ws, "STANDARD/header.html");
+        assertEquals(1, hitsh.size(), "header non deve matchare header-v2");
+        assertEquals("usa.html", hitsh.get(0).file());
+
+        // rinomina di STANDARD/header-v2.html: SOLO usa-v2.html è referenziante
+        var hitsv2 = service.scanReferences(ws, "STANDARD/header-v2.html");
+        assertEquals(1, hitsv2.size(), "header-v2 non deve matchare header");
+        assertEquals("usa-v2.html", hitsv2.get(0).file());
+    }
+
+    // ===== Guardia S1 sul resolver (R5): i frammenti ../ non leggono nulla fuori =====
+
+    @Test
+    void renderThrowsCleanErrorOnFragmentOutsideSnapshot() throws IOException {
+        Files.writeString(ws.resolve("segreto.html"),
+                "<div th:fragment=\"x\">TOPSECRET-FRAG</div>");
+        Files.writeString(snap("CLIENTE_A/leak-frag.html"),
+                "<html xmlns:th=\"http://www.thymeleaf.org\"><body>"
+                        + "<div th:replace=\"~{../segreto :: x}\"></div></body></html>");
+        assertThrows(org.thymeleaf.exceptions.TemplateInputException.class,
+                () -> service.renderDocument(ws, "CLIENTE_A/leak-frag.html", Map.of(), WorkspaceService.AssetTarget.PRINT),
+                "un frammento ../ deve fallire pulito, non leggere fuori dallo snapshot");
     }
 }

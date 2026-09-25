@@ -78,13 +78,12 @@ async function waitForVersion(page, document, version) {
 }
 
 (async () => {
-  const browser = await chromium.launch();
-  const context = await browser.newContext({ acceptDownloads: true });
-  const page = await context.newPage();
-  const errors = [];
-  page.on('pageerror', e => errors.push('pageerror: ' + e.message));
-  page.on('console', m => { if (m.type() === 'error' && !/404|409/.test(m.text())) errors.push('console: ' + m.text()); });
-  page.on('dialog', async d => { await d.accept(); });
+  const { makeCheck, rightClick, launch } = require('./test-utils');
+  const { check, state } = makeCheck();
+  const { browser, page, errors } = await launch({
+      acceptDownloads: true,
+      consoleFilter: /404|409/, // il 404 del candidates e il 409 atteso sono filtrati
+  });
 
   await page.goto('http://localhost:8080/');
   await page.fill('input[name="path"]', WS);
@@ -155,6 +154,11 @@ async function waitForVersion(page, document, version) {
   const relText = await page.locator('#release-tree').innerText();
   check('Explorer Release: documento e versione visibili', relText.includes('CLIENTE_A/fattura') && /v1/i.test(relText));
   check('Explorer Release: badge attiva', relText.toLowerCase().includes('attiva'));
+
+  // T7 (audit 03): nessun menu contestuale sulla sezione Release (sola lettura: mai modify/delete)
+  await rightClick(page, page.locator('#release-tree .rel-doc > summary').first());
+  await page.waitForTimeout(300);
+  check('Explorer Release: nessun menu contestuale (T7)', (await page.locator('#ctx-menu.open').count()) === 0);
 
   check('Explorer Release: dipendenze congelate raggruppate',
       (await page.locator('#release-tree').innerText()).includes('dipendenze congelate'));
@@ -253,5 +257,5 @@ async function waitForVersion(page, document, version) {
   else console.log('\n✅ Nessun errore JS');
 
   await browser.close();
-  process.exit(failures || realErrors.length ? 1 : 0);
+  process.exit(state.failures || realErrors.length ? 1 : 0);
 })().catch(e => { console.error('❌ TEST FALLITO:', e.message); process.exit(1); });

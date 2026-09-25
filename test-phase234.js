@@ -3,25 +3,16 @@
  * (template + CSS linkati + JSON) su workspace multi-tenant.
  * Uso: node test-phase234.js   (app avviata su :8080)
  */
-const { chromium } = require('playwright');
+const { makeCheck, launch, setEditorContent } = require('./test-utils');
 // reset del workspace demo (generato fuori dal repo dell'app)
 const WS = '/home/ocuda/workspace/stampe-demo';
 const { execSync } = require('child_process');
 execSync(`python3 ${__dirname}/tools/generate-demo-workspace.py ${WS}`);
 
-let failures = 0;
-function check(name, ok) { console.log((ok ? '✅' : '❌') + ' ' + name); if (!ok) failures++; }
-async function setEditorContent(page, text) {
-  await page.evaluate((t) => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: t } }), text);
-}
+const { check, state } = makeCheck();
 
 (async () => {
-  const browser = await chromium.launch();
-  const context = await browser.newContext({ acceptDownloads: true });
-  const page = await context.newPage();
-  const errors = [];
-  page.on('pageerror', e => errors.push('pageerror: ' + e.message));
-  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  const { browser, page, errors } = await launch({ acceptDownloads: true, acceptDialogs: false });
 
   // ===== Setup =====
   await page.goto('http://localhost:8080/');
@@ -149,5 +140,5 @@ async function setEditorContent(page, text) {
   else console.log('\n✅ Nessun errore JS');
 
   await browser.close();
-  process.exit(failures || realErrors.length ? 1 : 0);
+  process.exit(state.failures || realErrors.length ? 1 : 0);
 })().catch(e => { console.error('❌ TEST FALLITO:', e.message); process.exit(1); });

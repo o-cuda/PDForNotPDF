@@ -19,7 +19,8 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class ReleaseServiceTest {
 
-    private final ReleaseService service = new ReleaseService(new WorkspaceService());
+    private final RemoteConfig remote = new RemoteConfig("", "", "", "", true);
+    private final ReleaseService service = new ReleaseService(new WorkspaceService(), new GitOperations(new WorkspaceService(), remote), new HttpGiteaClient(remote), remote);
     private final WorkspaceService workspaceService = new WorkspaceService();
 
     @TempDir
@@ -320,5 +321,104 @@ class ReleaseServiceTest {
                 assertTrue(hasRelease, "release/ tracciata nel repo unico");
             }
         }
+    }
+
+    // ===== Guardia S1: la chiusura ignora i riferimenti fuori dallo snapshot (T10) =====
+
+    @Test
+    void resolveClosureIgnoresReferencesOutsideSnapshot() throws IOException {
+        Files.writeString(snap("CLIENTE_A/leak.html"), """
+                <html xmlns:th="http://www.thymeleaf.org">
+                <head><link rel="stylesheet" href="../segreto.css" /></head>
+                <body><img src="../segreto.png" />
+                <div th:replace="~{../fuori :: frag}"></div></body>
+                </html>
+                """);
+        Set<String> closure = service.resolveClosure(ws, "CLIENTE_A/leak.html", Map.of());
+        assertTrue(closure.contains("CLIENTE_A/leak.json"), "il JSON accoppiato resta nella chiusura");
+        for (String rel : closure) {
+            assertFalse(rel.contains(".."), "nessun riferimento fuori dallo snapshot nella chiusura: " + rel);
+        }
+    }
+
+    // ===== WP2/WP4: publish atomica + flusso PR via FakeGiteaClient (T13, T18) =====
+
+    /** Bare repo locale come remote: fetch/push git reali, forge simulata dal fake. */
+    private Path bareRemote() throws Exception {
+        Path bare = Files.createTempDirectory("bare-remote");
+        org.eclipse.jgit.api.Git.init().setBare(true).setDirectory(bare.toFile()).call();
+        return bare;
+    }
+
+    private ReleaseService serviceWithRemote(Path bare, FakeGiteaClient fake) {
+        RemoteConfig cfg = new RemoteConfig(bare.toString(), "http://fake/api", "utente", "segreto", true);
+        return new ReleaseService(new WorkspaceService(), new GitOperations(new WorkspaceService(), cfg), fake, cfg);
+    }
+
+    @Test
+    void publishWithOpenPullLeavesNoTrace() throws Exception {
+        // T13 (audit 05 / B1): la precondizione PR-aperta scatta PRIMA di ogni scrittura
+        Path bare = bareRemote();
+        FakeGiteaClient fake = new FakeGiteaClient();
+        fake.openPullUrl = "http://fake/pr/9";
+        ReleaseService remoteService = serviceWithRemote(bare, fake);
+
+        IOException ex = assertThrows(IOException.class, () -> remoteService.publish(ws,
+                "CLIENTE_A/preventivo.html", Map.of("CLIENTE_A/preventivo.html", "<html>dirty</html>"),
+                "nota", "tester"));
+        assertTrue(ex.getMessage().contains("Esiste già una candidata"));
+        assertFalse(Files.exists(ws.resolve("release/CLIENTE_A/preventivo/v1")),
+                "nessuna candidate orfana su disco (B1)");
+        assertFalse(Files.exists(ws.resolve("release/CLIENTE_A/preventivo/index.json")),
+                "index.json non toccato");
+        org.assertj.core.api.Assertions.assertThat(bare).isNotEmptyDirectory(); // il remote esiste
+        Files.walk(bare).sorted(java.util.Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+    }
+
+    @Test
+    void publishCreateFailureRollsBackReleaseArtifactsButKeepsDirty() throws Exception {
+        // T13-bis: push OK, creazione PR KO → rollback artefatti release; i dirty restano (D2=A)
+        Path bare = bareRemote();
+        FakeGiteaClient fake = new FakeGiteaClient();
+        ReleaseService remoteService = serviceWithRemote(bare, fake);
+
+        fake.failOnCreateMessage = "Gitea non raggiungibile";
+        assertThrows(IOException.class, () -> remoteService.publish(ws,
+                "CLIENTE_A/preventivo.html", Map.of("CLIENTE_A/preventivo.html", "<html>dirty</html>"),
+                "v1", "tester"));
+
+        // B1: la publish fallita non lascia artefatti sul disco
+        // (nota: con remote, dopo publish+checkout main la release/ non è sul working tree
+        //  per design — i file pubblicati tornano con la sync dopo il merge della PR)
+        assertFalse(Files.exists(ws.resolve("release/CLIENTE_A/preventivo/v1")),
+                "v1 rimossa dal rollback");
+        assertFalse(Files.exists(ws.resolve("release/CLIENTE_A/preventivo/index.json")),
+                "index.json scritto dalla publish fallita rimosso dal rollback");
+        assertEquals("<html>dirty</html>", Files.readString(snap("CLIENTE_A/preventivo.html")),
+                "D2=A: i dirty salvati restano su disco");
+        Files.walk(bare).sorted(java.util.Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+    }
+
+    @Test
+    void publishCreatesPullRequestViaFakeClient() throws Exception {
+        // T18 (audit 05): il flusso candidate→PR è unit-testabile grazie all'interfaccia (R3)
+        Path bare = bareRemote();
+        FakeGiteaClient fake = new FakeGiteaClient();
+        ReleaseService remoteService = serviceWithRemote(bare, fake);
+
+        ReleaseService.PublishResult result = remoteService.publish(ws,
+                "CLIENTE_A/preventivo.html", Map.of(), "nota di test", "tester");
+
+        assertEquals(1, result.version());
+        assertEquals(1, fake.createCalls);
+        assertEquals("CLIENTE_A/preventivo", fake.lastDocument);
+        assertEquals("candidate/CLIENTE_A/preventivo/v1", fake.lastBranch);
+        assertEquals("http://fake/pr/1", result.prUrl());
+        try (var git = org.eclipse.jgit.api.Git.open(bare.toFile())) {
+            assertTrue(git.branchList().call().stream()
+                            .anyMatch(r -> r.getName().endsWith("candidate/CLIENTE_A/preventivo/v1")),
+                    "il branch candidate è stato spinto sul remote");
+        }
+        Files.walk(bare).sorted(java.util.Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
     }
 }

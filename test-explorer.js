@@ -2,23 +2,16 @@
  * E2E: Explorer multi-tenant (STANDARD / CLIENTI) + tab + popout base.
  * Uso: node test-explorer.js   (app avviata su :8080)
  */
-const { chromium } = require('playwright');
+const { makeCheck, launch } = require('./test-utils');
 // reset del workspace demo (generato fuori dal repo dell'app)
 const WS = '/home/ocuda/workspace/stampe-demo';
 const { execSync } = require('child_process');
 execSync(`python3 ${__dirname}/tools/generate-demo-workspace.py ${WS}`);
 
-
-
-let failures = 0;
-function check(name, ok) { console.log((ok ? '✅' : '❌') + ' ' + name); if (!ok) failures++; }
+const { check, state } = makeCheck();
 
 (async () => {
-  const browser = await chromium.launch();
-  const page = await browser.newPage();
-  const errors = [];
-  page.on('pageerror', e => errors.push('pageerror: ' + e.message));
-  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  const { browser, page, errors } = await launch({ acceptDialogs: false });
 
   // Loader: path errato → errore
   await page.goto('http://localhost:8080/');
@@ -88,5 +81,5 @@ function check(name, ok) { console.log((ok ? '✅' : '❌') + ' ' + name); if (!
   else console.log('\n✅ Nessun errore JS');
 
   await browser.close();
-  process.exit(failures || realErrors.length ? 1 : 0);
+  process.exit(state.failures || realErrors.length ? 1 : 0);
 })().catch(e => { console.error('❌ TEST FALLITO:', e.message); process.exit(1); });
