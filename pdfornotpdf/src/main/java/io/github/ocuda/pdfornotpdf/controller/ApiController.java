@@ -2,7 +2,11 @@ package io.github.ocuda.pdfornotpdf.controller;
 
 import io.github.ocuda.pdfornotpdf.service.PdfService;
 import io.github.ocuda.pdfornotpdf.service.ReleaseService;
+import io.github.ocuda.pdfornotpdf.service.WorkspacePaths;
 import io.github.ocuda.pdfornotpdf.service.WorkspaceService;
+import io.github.ocuda.pdfornotpdf.web.ValidationException;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -15,6 +19,7 @@ import java.nio.file.Path;
 import java.util.Map;
 
 @RestController
+@Tag(name = "Generazione PDF", description = "API programmatica per gestionali esterni")
 @RequestMapping("/api")
 public class ApiController {
 
@@ -28,13 +33,14 @@ public class ApiController {
         this.releaseService = releaseService;
     }
 
+    @Operation(summary = "Genera un PDF da template + dati (JSON), snapshot pubblicato se presente")
     @PostMapping("/generate")
     public ResponseEntity<?> generatePdf(
             @RequestParam String workspace,
             @RequestParam String template,
             @RequestParam(required = false) Integer version,
             @RequestParam(required = false) String cssFile,
-            @RequestBody(required = false) Map<String, Object> data) throws IOException {
+            @RequestBody(required = false) Map<String, Object> data) {
 
         try {
             Path dir = Path.of(workspace);
@@ -57,7 +63,7 @@ public class ApiController {
                 html = workspaceService.renderDocument(dir, template, Map.of(), WorkspaceService.AssetTarget.PRINT);
             }
             String css = (cssFile != null && !cssFile.isBlank())
-                    ? workspaceService.readFile(workspaceService.snapshotRoot(dir).resolve(cssFile))
+                    ? WorkspacePaths.readTextInside(workspaceService.snapshotRoot(dir), cssFile)
                     : null;
             html = workspaceService.injectCss(html, css);
 
@@ -71,11 +77,9 @@ public class ApiController {
                     .contentLength(pdf.length)
                     .body(resource);
         } catch (Exception e) {
-            // Errore pulito invece dello stack trace (es. template inesistente)
-            String msg = "Impossibile generare il PDF: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
-            return ResponseEntity.badRequest()
-                    .contentType(MediaType.TEXT_PLAIN)
-                    .body(msg.getBytes(StandardCharsets.UTF_8));
+            // contratto di stampa: 400 con messaggio presentabile; lo stacktrace va nei log (R7)
+            throw new ValidationException("Impossibile generare il PDF: "
+                    + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()));
         }
     }
 }

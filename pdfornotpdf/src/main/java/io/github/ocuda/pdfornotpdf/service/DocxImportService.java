@@ -3,10 +3,12 @@ package io.github.ocuda.pdfornotpdf.service;
 import org.apache.poi.ooxml.POIXMLDocumentPart;
 import org.apache.poi.xwpf.model.XWPFHeaderFooterPolicy;
 import org.apache.poi.xwpf.usermodel.*;
+import io.github.ocuda.pdfornotpdf.service.WorkspacePaths;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -23,7 +25,9 @@ import java.util.regex.Pattern;
  *  - titoli: stili Heading* / Titolo* + euristica "paragrafo breve tutto maiuscolo"
  *  - tabelle → table/tr/td (prima riga th)
  *  - elenchi (numerati e puntati) → ul/ol + li
- *  - immagini incorporate → estratte in assets/import/<documento>/ con <img>
+ *  - immagini incorporate → estratte in <cartella>/assets/import/<documento>/ con <img>
+ *    (root se l'import avviene senza cartella); gli <img src> sono root-relative,
+ *    stessa convenzione di CLIENTE_A/assets
  *
  * I placeholder Word ([NOME DEL PROPIETARIO]) restano testo: la mappatura verso th:*
  * avviene dopo (a mano o con l'assistente LLM).
@@ -36,17 +40,29 @@ public class DocxImportService {
     public record ImportedFile(String path, String content) {}
     public record ImportResult(String templatePath, String html, List<ImportedFile> assets) {}
 
-    /** Variante che salva gli asset su disco mentre li estrae (evita il passaggio base64). */
+    /** Variante che salva gli asset su disco mentre li estrae (evita il passaggio base64).
+     *  B3 (audit 05): il template esistente rifiuta la riscrittura con FileAlreadyExistsException
+     *  PRIMA di qualsiasi estrazione/scrittura — il 409 arriva senza effetti collaterali su disco. */
     public ImportResult importDocxToFiles(String docxName, InputStream docxStream, Path wsRoot,
-                                          String folder, List<ImportedFile> assetsOut) throws IOException {
+                                          String folder, boolean overwrite, List<ImportedFile> assetsOut) throws IOException {
         String base = sanitizeBase(docxName);
-        String assetPrefix = "assets/import/" + base;
-        Path assetsDir = wsRoot.resolve(assetPrefix);
+        // C2 (audit 05): la cartella arriva da parametri di request — validata PRIMA di qualsiasi
+        // scrittura (gli asset vengono scritti durante l'estrazione, non dopo)
+        String rel = (folder == null ? "" : folder.replace('\\', '/') + "/") + base + ".html";
+        WorkspacePaths.validateRelPath(rel);
+        Path templatePath = WorkspacePaths.resolveInside(wsRoot, rel);
+        if (Files.exists(templatePath) && !overwrite) {
+            throw new FileAlreadyExistsException(rel);
+        }
+        // gli asset seguono la cartella del template: ALBA2/assets/import/<doc>/…
+        // altrimenti le <img> con src root-relative sarebbero rotte (defetto del 2026-09-22)
+        String assetPrefix = (folder == null || folder.isBlank() ? "" : folder.replace('\\', '/') + "/")
+                + "assets/import/" + base;
         XWPFDocument doc = new XWPFDocument(docxStream);
 
         // body + header/footer di Word: nelle carte intestate il contenuto sta nell'header,
         // non nel body — senza questa estrazione l'import produrrebbe una pagina vuota.
-        StringBuilder body = renderElements(doc.getBodyElements(), wsRoot, assetsDir, assetPrefix, assetsOut, true);
+        StringBuilder body = renderElements(doc.getBodyElements(), wsRoot, assetPrefix, assetsOut, true);
         String headerHtml = "";
         String footerHtml = "";
         try {
@@ -56,11 +72,11 @@ public class DocxImportService {
             var writtenByHash = new java.util.HashMap<Integer, String>();
             if (hdr != null) {
                 // per header/footer le immagini (inline E ancorate) vengono dagli r:embed della parte
-                headerHtml = renderElements(hdr.getBodyElements(), wsRoot, assetsDir, assetPrefix, assetsOut, false).toString()
+                headerHtml = renderElements(hdr.getBodyElements(), wsRoot, assetPrefix, assetsOut, false).toString()
                         + extractBlipImages(hdr, writtenByHash, wsRoot, assetPrefix, assetsOut);
             }
             if (ftr != null) {
-                footerHtml = renderElements(ftr.getBodyElements(), wsRoot, assetsDir, assetPrefix, assetsOut, false).toString()
+                footerHtml = renderElements(ftr.getBodyElements(), wsRoot, assetPrefix, assetsOut, false).toString()
                         + extractBlipImages(ftr, writtenByHash, wsRoot, assetPrefix, assetsOut);
             }
         } catch (Exception ignored) {
@@ -85,7 +101,7 @@ public class DocxImportService {
      * Rendering di paragrafi/tabelle/elenchi di una parte del documento (body, header o footer
      * di Word): condiviso tra le tre sezioni con estrazione immagini su disco.
      */
-    private StringBuilder renderElements(List<IBodyElement> elements, Path wsRoot, Path assetsDir,
+    private StringBuilder renderElements(List<IBodyElement> elements, Path wsRoot,
                                          String assetPrefix, List<ImportedFile> assetsOut,
                                          boolean extractRunPictures) throws IOException {
         StringBuilder out = new StringBuilder();
@@ -134,30 +150,6 @@ public class DocxImportService {
     }
 
     // ===== rendering runs =====
-
-    private String renderRuns(XWPFParagraph p, Path assetsDir, String assetPrefix, List<ImportedFile> assets) {
-        StringBuilder sb = new StringBuilder();
-        for (XWPFRun r : p.getRuns()) {
-            for (XWPFPicture pic : r.getEmbeddedPictures()) {
-                String ext = pic.getPictureData().suggestFileExtension();
-                String fileName = "img-" + System.nanoTime() + "-" + assets.size() + "." + ext;
-                try {
-                    Files.createDirectories(assetsDir);
-                    Files.write(assetsDir.resolve(fileName), pic.getPictureData().getData());
-                    assets.add(new ImportedFile(assetPrefix + "/" + fileName, ""));
-                    sb.append("<img src=\"").append(assetPrefix).append("/").append(fileName).append("\" style=\"max-width:100%;\" />");
-                } catch (IOException ignored) { }
-            }
-            String text = r.text();
-            if (text == null || text.isEmpty()) continue;
-            String open = "", close = "";
-            if (r.isBold()) { open += "<strong>"; close = "</strong>" + close; }
-            if (r.isItalic()) { open += "<em>"; close = "</em>" + close; }
-            if (r.getUnderline() != org.apache.poi.xwpf.usermodel.UnderlinePatterns.NONE) { open += "<u>"; close = "</u>" + close; }
-            sb.append(open).append(escape(text)).append(close);
-        }
-        return sb.toString().trim();
-    }
 
     private String renderRunsToFiles(XWPFParagraph p, Path wsRoot, String assetPrefix,
                                      List<ImportedFile> assets, boolean extractPictures) {

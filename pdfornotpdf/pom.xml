@@ -50,10 +50,6 @@
         </dependency>
 
         <!-- Thymeleaf extras for Spring 6 / jakarta -->
-        <dependency>
-            <groupId>org.thymeleaf.extras</groupId>
-            <artifactId>thymeleaf-extras-springsecurity6</artifactId>
-        </dependency>
 
         <!-- OGNL for standalone Thymeleaf TemplateEngine -->
         <dependency>

@@ -10,6 +10,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -62,10 +64,47 @@ public class LlmService {
         return (perRequest != null && !perRequest.isBlank()) ? perRequest : fallback;
     }
 
+    /**
+     * Contesto per l'assistente: i file della chiusura (html/css/json) con contenuto
+     * dirty-first, letti dalla RADICE SNAPSHOT (audit 05 / B2: prima leggeva da ws/ e i
+     * file non-dirty non arrivavano mai al modello).
+     */
+    public List<Map<String, String>> buildContext(Path snapshotRoot, java.util.Set<String> closure,
+                                                  Map<String, String> dirtyFiles) throws IOException {
+        List<Map<String, String>> files = new ArrayList<>();
+        for (String rel : closure) {
+            String kind = WorkspaceService.kindOf(rel);
+            if (!"html".equals(kind) && !"css".equals(kind) && !"json".equals(kind)) continue;
+            String content;
+            if (dirtyFiles != null && dirtyFiles.containsKey(rel)) {
+                content = dirtyFiles.get(rel);
+            } else {
+                Path p = WorkspacePaths.resolveInside(snapshotRoot, rel);
+                content = Files.exists(p) ? Files.readString(p) : null;
+            }
+            if (content != null) {
+                files.add(Map.of("path", rel, "content", content));
+            }
+        }
+        return files;
+    }
+
+    /** Config per-request valida: solo schemi http/https (audit 03 / S4: il server non deve
+     *  poter essere usato come sonde verso schemi interni, file:// o metadata cloud). */
+    static String validatedBaseUrl(String raw) {
+        String b = stripTrailingSlash(raw);
+        String scheme = URI.create(b).getScheme();
+        scheme = scheme == null ? "" : scheme.toLowerCase();
+        if (!scheme.equals("http") && !scheme.equals("https")) {
+            throw new IllegalArgumentException("Base URL LLM non valido (attesi http:// o https://): " + raw);
+        }
+        return b;
+    }
+
     /** contesto: [{path, content}] dei file della chiusura del documento (overlay-first). */
     public AssistResult assist(String instruction, List<Map<String, String>> files, LlmConfig override)
             throws IOException, InterruptedException {
-        String bu = pick(override != null ? override.baseUrl() : null, baseUrl);
+        String bu = validatedBaseUrl(pick(override != null ? override.baseUrl() : null, baseUrl));
         String key = pick(override != null ? override.apiKey() : null, apiKey);
         String mdl = pick(override != null ? override.model() : null, model);
         if (bu == null || bu.isBlank() || mdl == null || mdl.isBlank())
@@ -101,7 +140,7 @@ public class LlmService {
                 Map.of("role", "system", "content", system),
                 Map.of("role", "user", "content", user)));
 
-        HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(stripTrailingSlash(bu) + "/chat/completions"))
+        HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(bu + "/chat/completions"))
                 .timeout(Duration.ofSeconds(120))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(om.writeValueAsString(body)));
@@ -151,8 +190,10 @@ public class LlmService {
         String spiegazione = root.path("spiegazione").asText(
                 root.path("explanation").asText("Modifica proposta dall'assistente"));
         List<FileEdit> modifiche = new ArrayList<>();
-        JsonNode mods = root.withArray("modifiche");
-        if (mods.isMissingNode()) mods = root.withArray("edits");
+        // NB: withArray() di Jackson CREA un array vuoto se assente — il fallback sull'alias
+        // inglese va fatto con has(), altrimenti non scatta mai (bug trovato da T9)
+        JsonNode mods = root.has("modifiche") ? root.withArray("modifiche")
+                : root.withArray("edits");
         for (JsonNode m : mods) {
             String path = m.path("path").asText(null);
             String contenuto = m.has("contenuto") ? m.path("contenuto").asText()

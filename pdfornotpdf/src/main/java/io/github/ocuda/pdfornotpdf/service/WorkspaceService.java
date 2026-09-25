@@ -2,27 +2,36 @@ package io.github.ocuda.pdfornotpdf.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jsoup.Jsoup;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.springframework.stereotype.Service;
+import org.thymeleaf.IEngineConfiguration;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
-import org.thymeleaf.templateresolver.FileTemplateResolver;
+import org.thymeleaf.templateresolver.AbstractConfigurableTemplateResolver;
+import org.thymeleaf.templateresource.FileTemplateResource;
+import org.thymeleaf.templateresource.ITemplateResource;
+import org.thymeleaf.templateresource.StringTemplateResource;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
 @Service
 public class WorkspaceService {
+
+    private static final Logger log = LoggerFactory.getLogger(WorkspaceService.class);
 
     /** Directory delle release pubblicate: fuori dall'area di lavoro, con storico git dedicato. */
     public static final String RELEASE_DIR = "release";
@@ -66,12 +75,13 @@ public class WorkspaceService {
 
     /**
      * Albero ricorsivo del workspace per l'Explorer: prima le directory, poi i file, ordine alfabetico.
+     * Una sotto-cartella illeggibile (permessi) compare come vuota invece di far fallire l'albero.
      */
-    public TreeNode buildTree(Path workspaceDir) throws IOException {
+    public TreeNode buildTree(Path workspaceDir) {
         return buildDirNode(snapshotRoot(workspaceDir), "");
     }
 
-    private TreeNode buildDirNode(Path dir, String relPath) throws IOException {
+    private TreeNode buildDirNode(Path dir, String relPath) {
         List<TreeNode> children = new ArrayList<>();
         try (Stream<Path> stream = Files.list(dir)) {
             List<Path> entries = stream
@@ -92,6 +102,8 @@ public class WorkspaceService {
                     children.add(new TreeNode(name, childRel, "file", kindOf(name), List.of()));
                 }
             }
+        } catch (IOException | UncheckedIOException e) {
+            log.warn("Cartella non esplorabile, mostrata come vuota: {} ({})", dir, e.getMessage());
         }
         return new TreeNode(dir.getFileName().toString(), relPath, "dir", null, children);
     }
@@ -123,7 +135,9 @@ public class WorkspaceService {
         try (Stream<Path> stream = Files.walk(path)) {
             return stream.anyMatch(p -> Files.isRegularFile(p)
                     && p.getFileName().toString().toLowerCase().endsWith(".html"));
-        } catch (IOException e) {
+        } catch (IOException | UncheckedIOException e) {
+            // anche una sotto-cartella illeggibile (es. /tmp/systemd-private-*) non deve produrre un 500
+            log.debug("Directory non esplorabile ({}): {}", path, e.getMessage());
             return false;
         }
     }
@@ -133,13 +147,44 @@ public class WorkspaceService {
     }
 
     /**
+     * Salva un'immagine caricata dall'utente dentro l'area snapshot (audit 03 / S5+R6: la
+     * validazione dei percorsi vive SOLO qui, segment-by-segment, come per le altre file-ops).
+     *
+     * @return il percorso relativo scritto (cartella + nome)
+     * @throws IllegalArgumentException cartella o nome non validi (segmenti ".", ".." o nascosti)
+     * @throws FileAlreadyExistsException se il percorso esiste già e replace è false
+     */
+    public String saveUploadedImage(Path workspaceDir, String folder, String fileName,
+                                    java.io.InputStream in, boolean replace) throws IOException {
+        if (fileName == null || fileName.isBlank()) throw new IllegalArgumentException("Nome file mancante");
+        String name = fileName.replace('\\', '/');
+        if (name.contains("/")) name = name.substring(name.lastIndexOf('/') + 1);
+        if (name.isBlank() || name.startsWith(".")) {
+            throw new IllegalArgumentException("Nome non valido: '" + name + "'");
+        }
+        String folderRel = (folder == null || folder.isBlank()) ? "assets"
+                : folder.replace('\\', '/').replaceAll("^/+|/+$", "");
+        WorkspacePaths.validateRelPath(folderRel + "/" + name);
+        Path root = snapshotRoot(workspaceDir).toAbsolutePath().normalize();
+        Path target = root.resolve(folderRel).resolve(name).normalize();
+        if (!target.startsWith(root)) {
+            throw new IllegalArgumentException("Percorso fuori dal workspace");
+        }
+        if (Files.exists(target) && !replace) {
+            throw new FileAlreadyExistsException(folderRel + "/" + name);
+        }
+        Files.createDirectories(target.getParent());
+        try (in) {
+            Files.copy(in, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+        return folderRel + "/" + name;
+    }
+
+    /**
      * Salva un file del workspace (sovrascrive). Il percorso è validato contro path-traversal.
      */
     public void saveFile(Path workspaceDir, String relPath, String content) throws IOException {
-        Path target = snapshotRoot(workspaceDir).resolve(relPath).normalize();
-        if (!target.startsWith(snapshotRoot(workspaceDir).toAbsolutePath().normalize())) {
-            throw new IOException("Percorso fuori dal workspace: " + relPath);
-        }
+        Path target = WorkspacePaths.resolveInside(snapshotRoot(workspaceDir), relPath);
         Files.createDirectories(target.getParent());
         Files.writeString(target, content == null ? "" : content);
     }
@@ -148,10 +193,7 @@ public class WorkspaceService {
      * Serve un'immagine del workspace (per l'anteprima nei template). Percorso validato contro traversal.
      */
     public byte[] readImage(Path workspaceDir, String relPath) throws IOException {
-        Path target = snapshotRoot(workspaceDir).resolve(relPath).normalize();
-        if (!target.startsWith(snapshotRoot(workspaceDir).toAbsolutePath().normalize())) {
-            throw new IOException("Percorso fuori dal workspace: " + relPath);
-        }
+        Path target = WorkspacePaths.resolveInside(snapshotRoot(workspaceDir), relPath);
         String n = relPath.toLowerCase();
         if (!isImage(n) && !n.endsWith(".pdf")) {
             throw new IOException("Asset non servibile: " + relPath);
@@ -174,43 +216,14 @@ public class WorkspaceService {
     }
 
     /**
-     * Valida un percorso relativo: segmenti non vuoti, senza punti-inizi (niente nascosti/.git),
-     * releases/ riservata agli snapshot, lunghezza ragionevole. Lancia IllegalArgumentException
-     * con messaggio presentabile all'utente.
-     */
-    private void validateRelPath(String relPath) {
-        if (relPath == null || relPath.isBlank()) throw new IllegalArgumentException("Percorso vuoto");
-        String p = relPath.replace('\\', '/');
-        if (p.length() > 1024) throw new IllegalArgumentException("Percorso non valido: " + relPath);
-        String[] segments = p.split("/");
-        for (String s : segments) {
-            if (s.isBlank() || s.equals(".") || s.equals("..") || s.startsWith(".")) {
-                throw new IllegalArgumentException("Nome non valido: '" + s + "'");
-            }
-        }
-        if (segments[segments.length - 1].length() > 255) {
-            throw new IllegalArgumentException("Nome troppo lungo (max 255 caratteri)");
-        }
-    }
-
-    private Path resolveInsideWorkspace(Path workspaceDir, String relPath) {
-        Path root = snapshotRoot(workspaceDir).toAbsolutePath().normalize();
-        Path target = root.resolve(relPath.replace('\\', '/')).normalize();
-        if (!target.startsWith(root)) {
-            throw new IllegalArgumentException("Percorso fuori dal workspace: " + relPath);
-        }
-        return target;
-    }
-
-    /**
      * Crea un file o una cartella nel workspace. Un nuovo .html nasce con lo scaffold minimo,
      * un .json con {}, gli altri file vuoti.
      *
      * @throws FileAlreadyExistsException se il percorso esiste già
      */
     public void createNode(Path workspaceDir, String relPath, boolean isDir) throws IOException {
-        validateRelPath(relPath);
-        Path target = resolveInsideWorkspace(workspaceDir, relPath);
+        WorkspacePaths.validateRelPath(relPath);
+        Path target = WorkspacePaths.resolveInside(snapshotRoot(workspaceDir), relPath);
         if (Files.exists(target)) throw new FileAlreadyExistsException(relPath);
         if (isDir) {
             Files.createDirectories(target);
@@ -248,10 +261,10 @@ public class WorkspaceService {
      * @throws FileAlreadyExistsException se la destinazione esiste già
      */
     public List<MovedFile> renameNode(Path workspaceDir, String fromRel, String toRel) throws IOException {
-        validateRelPath(fromRel);
-        validateRelPath(toRel);
-        Path from = resolveInsideWorkspace(workspaceDir, fromRel);
-        Path to = resolveInsideWorkspace(workspaceDir, toRel);
+        WorkspacePaths.validateRelPath(fromRel);
+        WorkspacePaths.validateRelPath(toRel);
+        Path from = WorkspacePaths.resolveInside(snapshotRoot(workspaceDir), fromRel);
+        Path to = WorkspacePaths.resolveInside(snapshotRoot(workspaceDir), toRel);
         if (!Files.exists(from)) throw new FileNotFoundException("Non trovato: " + fromRel);
         if (Files.exists(to)) throw new FileAlreadyExistsException(toRel);
         if (to.getParent() == null || !Files.isDirectory(to.getParent())) {
@@ -311,7 +324,7 @@ public class WorkspaceService {
      * file rinominato stesso.
      */
     public List<ReferenceHit> scanReferences(Path workspaceDir, String fromRel) throws IOException {
-        validateRelPath(fromRel);
+        WorkspacePaths.validateRelPath(fromRel);
         List<String> needles = needlesFor(fromRel);
         List<ReferenceHit> hits = new ArrayList<>();
         for (Map.Entry<String, String> e : textFilesWithContent(workspaceDir).entrySet()) {
@@ -352,8 +365,8 @@ public class WorkspaceService {
      * @return i percorsi effettivamente cancellati (include la coppia)
      */
     public List<String> deleteNode(Path workspaceDir, String relPath) throws IOException {
-        validateRelPath(relPath);
-        Path target = resolveInsideWorkspace(workspaceDir, relPath);
+        WorkspacePaths.validateRelPath(relPath);
+        Path target = WorkspacePaths.resolveInside(snapshotRoot(workspaceDir), relPath);
         if (!Files.exists(target)) throw new FileNotFoundException("Non trovato: " + relPath);
         List<String> deleted = new ArrayList<>();
         String rel = relPath.replace('\\', '/');
@@ -409,8 +422,9 @@ public class WorkspaceService {
         return updated;
     }
 
-    /** Contenuto dei file di testo dell'area di snapshot (rel → contenuto); i nascosti sono esclusi. */
-    private Map<String, String> textFilesWithContent(Path workspaceDir) throws IOException {
+    /** Contenuto dei file di testo dell'area di snapshot (rel → contenuto); i nascosti sono esclusi.
+     *  Una sotto-cartella illeggibile degrada a contenuto parziale invece di far fallire l'operazione. */
+    private Map<String, String> textFilesWithContent(Path workspaceDir) {
         Path root = snapshotRoot(workspaceDir).toAbsolutePath().normalize();
         Map<String, String> files = new java.util.LinkedHashMap<>();
         try (Stream<Path> walk = Files.walk(root)) {
@@ -424,27 +438,77 @@ public class WorkspaceService {
                     // file non leggibile (es. encoding strano): si salta
                 }
             }
+        } catch (IOException | UncheckedIOException e) {
+            log.warn("Scan file di testo parziale (sotto-cartella illeggibile in {}): {}", root, e.getMessage());
         }
         return files;
     }
 
     // ===== Render =====
 
-    /**
-     * Configurazione Thymeleaf standard: prefix = root del workspace, suffix = ".html", nome logico
-     * senza estensione. Gli include th:replace (~{STANDARD/tabella-tariffe :: frag}) si risolvono
-     * da qualunque cartella, perché tutti i percorsi sono relativi alla root.
-     */
-    private TemplateEngine engineFor(Path workspaceDir) {
-        FileTemplateResolver resolver = new FileTemplateResolver();
-        resolver.setPrefix(workspaceDir.toAbsolutePath() + "/");
-        resolver.setSuffix(".html");
-        resolver.setTemplateMode("HTML");
-        resolver.setCharacterEncoding("UTF-8");
-        resolver.setCacheable(false);
+    /** Cache dei TemplateEngine per radice di workspace (R5): l'engine è thread-safe e con
+     *  resolver cacheable=false ricontenta sempre il disco, quindi il contenuto è sempre fresco. */
+    private final Map<Path, TemplateEngine> engineCache =
+            java.util.Collections.synchronizedMap(new LinkedHashMap<>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<Path, TemplateEngine> eldest) {
+                    return size() > 4;
+                }
+            });
 
+    /**
+     * Resolver Thymeleaf con guardia di percorso (audit 03 / S1) e overlay in memoria (R5):
+     * - un riferimento che esce dal workspace (~{"../fuori"}) NON viene mai letto dal disco;
+     * - i buffer dirty (overlay) risolvono senza copiare il workspace in una temp dir.
+     */
+    private final class GuardedOverlayResolver extends AbstractConfigurableTemplateResolver {
+
+        private final Path root;
+        private final Map<String, String> overlay;
+
+        GuardedOverlayResolver(Path root, Map<String, String> overlay) {
+            this.root = root.toAbsolutePath().normalize();
+            this.overlay = overlay == null ? Map.of() : overlay;
+            setTemplateMode("HTML");
+            setSuffix(".html");
+            setCacheable(false);
+            setCheckExistence(true);
+        }
+
+        @Override
+        protected ITemplateResource computeTemplateResource(IEngineConfiguration configuration,
+                                                            String ownerTemplate, String template,
+                                                            String prefix, String suffix,
+                                                            Map<String, Object> templateResolutionAttributes) {
+            String rel = (template.endsWith(".html") ? template : template + ".html").replace('\\', '/');
+            Path p = WorkspacePaths.resolveInsideOrNull(root, rel);
+            if (p == null) {
+                log.warn("Riferimento template fuori dal workspace scartato: {} (radice {})", rel, root);
+                // risorsa inesistente → TemplateInputException pulita (400 dal GlobalExceptionHandler)
+                return new FileTemplateResource(root.resolve("__fuori_dal_workspace__.html").toFile(), null);
+            }
+            String live = overlay.get(rel);
+            if (live != null) return new StringTemplateResource(live);
+            return new FileTemplateResource(p.toFile(), null);
+        }
+    }
+
+    private TemplateEngine engineFor(Path templateDir, Map<String, String> overlay) {
+        Path root = templateDir.toAbsolutePath().normalize();
+        boolean noOverlay = overlay == null || overlay.isEmpty();
+        if (noOverlay) {
+            synchronized (engineCache) {
+                TemplateEngine cached = engineCache.get(root);
+                if (cached != null) return cached;
+            }
+        }
         TemplateEngine engine = new TemplateEngine();
-        engine.setTemplateResolver(resolver);
+        engine.setTemplateResolver(new GuardedOverlayResolver(root, overlay));
+        if (noOverlay) {
+            synchronized (engineCache) {
+                engineCache.put(root, engine);
+            }
+        }
         return engine;
     }
 
@@ -465,49 +529,20 @@ public class WorkspaceService {
         }
     }
 
-    /** Render diretto da disco (nome logico senza estensione). */
+    /** Render diretto da disco (nome logico senza estensione). Engine riusato per radice (R5). */
     public String renderTemplate(Path templateDir, String templateName, String jsonData) {
         String logicalName = templateName.replaceAll("(?i)\\.html$", "");
-        return engineFor(templateDir).process(logicalName, contextWith(parseJson(jsonData)));
+        return engineFor(templateDir, Map.of()).process(logicalName, contextWith(parseJson(jsonData)));
     }
 
     /**
-     * Render con overlay: copia il workspace in una directory temporanea, sovrascrive i file
-     * con le versioni live (buffer modificati, CSS e JSON compresi) e renderizza da lì.
-     * Copia TUTTI i file: gli asset (immagini) referenziati nei template restano risolvibili.
+     * Render con overlay: i buffer live (modificati, CSS e JSON compresi) risolvono in memoria
+     * nel resolver (R5), senza più copia del workspace in temp dir a ogni anteprima. Gli asset
+     * non dirty restano su disco: le immagini non passano dal resolver ma da inlineLinkedAssets.
      */
-    public String renderOverlayTemplate(Path workspaceDir, String templateName, Map<String, String> overlay, String jsonData) throws IOException {
-        Path tmp = Files.createTempDirectory("pdforNotPdf-overlay");
-        try {
-            copyWorkspaceWithOverlay(workspaceDir, tmp, overlay);
-            return renderTemplate(tmp, templateName, jsonData);
-        } finally {
-            deleteRecursively(tmp);
-        }
-    }
-
-    private void copyWorkspaceWithOverlay(Path src, Path dst, Map<String, String> overlay) throws IOException {
-        try (Stream<Path> walk = Files.walk(src)) {
-            for (Path p : walk.filter(Files::isRegularFile).toList()) {
-                String rel = src.relativize(p).toString().replace('\\', '/');
-                Path target = dst.resolve(rel);
-                Files.createDirectories(target.getParent());
-                String live = overlay.get(rel);
-                if (live != null) {
-                    Files.writeString(target, live);
-                } else {
-                    Files.copy(p, target);
-                }
-            }
-        }
-    }
-
-    private void deleteRecursively(Path path) throws IOException {
-        try (Stream<Path> walk = Files.walk(path)) {
-            walk.sorted(Comparator.reverseOrder()).forEach(p -> {
-                try { Files.delete(p); } catch (IOException ignored) { }
-            });
-        }
+    public String renderOverlayTemplate(Path workspaceDir, String templateName, Map<String, String> overlay, String jsonData) {
+        String logicalName = templateName.replaceAll("(?i)\\.html$", "");
+        return engineFor(workspaceDir, overlay).process(logicalName, contextWith(parseJson(jsonData)));
     }
 
     /** Inietta il CSS come <style> prima di </head> (usato dalla REST API per il parametro cssFile). */
@@ -537,7 +572,7 @@ public class WorkspaceService {
         Path snapshot = snapshotRoot(workspaceDir);
         Map<String, String> ov = overlay != null ? overlay : Map.of();
         String jsonRel = templateRel.replaceAll("(?i)\\.html$", ".json");
-        String jsonContent = ov.containsKey(jsonRel) ? ov.get(jsonRel) : readQuiet(snapshot.resolve(jsonRel));
+        String jsonContent = ov.containsKey(jsonRel) ? ov.get(jsonRel) : WorkspacePaths.readTextOrNull(snapshot, jsonRel);
 
         String html = ov.isEmpty()
                 ? renderTemplate(snapshot, templateRel, jsonContent)
@@ -556,9 +591,10 @@ public class WorkspaceService {
 
         for (Element link : doc.select("link[rel~=stylesheet]")) {
             String href = link.attr("href");
-            if (isExternal(href)) continue;
-            String rel = normalizeRel(href);
-            String css = ov.containsKey(rel) ? ov.get(rel) : readQuiet(Path.of(root, rel));
+            if (WorkspacePaths.isExternal(href)) continue;
+            String rel = WorkspacePaths.normalizeRel(href);
+            // guardia S1: un riferimento che esce dal workspace non viene mai letto dal disco
+            String css = WorkspacePaths.staysInside(rel) ? (ov.containsKey(rel) ? ov.get(rel) : WorkspacePaths.readTextOrNull(workspaceDir, rel)) : null;
             Element style = doc.createElement("style");
             style.text(css != null ? css : "/* CSS non trovato: " + href + " */");
             link.replaceWith(style);
@@ -566,13 +602,14 @@ public class WorkspaceService {
 
         for (Element img : doc.select("img[src]")) {
             String src = img.attr("src");
-            if (isExternal(src)) continue;
-            String rel = normalizeRel(src);
+            if (WorkspacePaths.isExternal(src)) continue;
+            String rel = WorkspacePaths.normalizeRel(src);
+            if (!WorkspacePaths.staysInside(rel)) continue; // guardia S1: niente data-URI con file esterni allo snapshot
             switch (target) {
                 case PREVIEW -> img.attr("src",
                         "/workspace/asset?workspace=" + urlEncode(root) + "&file=" + urlEncode(rel));
                 case PRINT -> {
-                    byte[] bytes = readQuietBytes(Path.of(root, rel));
+                    byte[] bytes = WorkspacePaths.readBytesOrNull(workspaceDir, rel);
                     if (bytes != null) {
                         img.attr("src", "data:" + mimeFor(rel) + ";base64," + Base64.getEncoder().encodeToString(bytes));
                     }
@@ -606,29 +643,15 @@ public class WorkspaceService {
         return java.net.URLEncoder.encode(s, java.nio.charset.StandardCharsets.UTF_8);
     }
 
-    private String readQuiet(Path path) {
-        try {
-            return Files.readString(path);
-        } catch (IOException e) {
-            return null;
-        }
-    }
-
-    private byte[] readQuietBytes(Path path) {
-        try {
-            return Files.readAllBytes(path);
-        } catch (IOException e) {
-            return null;
-        }
-    }
-
-    private static String mimeFor(String rel) {
+    /** Mime type per estensione (unico per asset, viewer immagini e stampe — audit 05/K3). */
+    public static String mimeFor(String rel) {
         String n = rel.toLowerCase();
         if (n.endsWith(".png")) return "image/png";
         if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
         if (n.endsWith(".gif")) return "image/gif";
         if (n.endsWith(".webp")) return "image/webp";
         if (n.endsWith(".svg")) return "image/svg+xml";
+        if (n.endsWith(".pdf")) return "application/pdf";
         return "application/octet-stream";
     }
 

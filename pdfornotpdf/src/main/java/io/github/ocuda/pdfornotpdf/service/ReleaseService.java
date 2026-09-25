@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.api.ListBranchCommand;
 import org.eclipse.jgit.api.MergeResult;
 import org.eclipse.jgit.lib.PersonIdent;
 import org.eclipse.jgit.lib.Ref;
@@ -15,13 +14,15 @@ import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.RemoteRefUpdate;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.jsoup.Jsoup;
-import org.springframework.beans.factory.annotation.Value;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -69,25 +70,18 @@ import java.util.stream.Stream;
 @Service
 public class ReleaseService {
 
-    private final WorkspaceService workspaceService;
-    private final ObjectMapper om = new ObjectMapper();
-    private final HttpClient http = HttpClient.newHttpClient();
+    private static final Logger log = LoggerFactory.getLogger(ReleaseService.class);
 
-    @Value("${app.release.remote.url:}")
-    private String remoteUrl;
-    @Value("${app.release.remote.api:}")
-    private String remoteApi;
-    @Value("${app.release.remote.user:}")
-    private String remoteUser;
-    @Value("${app.release.remote.password:}")
-    private String remotePassword;
-    @Value("${app.release.remote.pr-auto:true}")
-    private boolean prAuto;
+    private final WorkspaceService workspaceService;
+    private final GitOperations gitOps;
+    private final GiteaClient gitea;
+    private final RemoteConfig remote;
+    private final ObjectMapper om = new ObjectMapper();
 
     private volatile Path lastWorkspaceDir;
 
     private boolean remoteEnabled() {
-        return remoteUrl != null && !remoteUrl.isBlank();
+        return remote.enabled();
     }
 
     /** Il scheduler e i pulsanti di sync operano sull'ultimo workspace caricato. */
@@ -96,10 +90,13 @@ public class ReleaseService {
     }
 
     private static final Pattern INCLUDE_REF = Pattern.compile("~\\{([^}]*)\\}");
-    private static final String RELEASE_DIR = "release";
 
-    public ReleaseService(WorkspaceService workspaceService) {
+    public ReleaseService(WorkspaceService workspaceService, GitOperations gitOps,
+                          GiteaClient gitea, RemoteConfig remote) {
         this.workspaceService = workspaceService;
+        this.gitOps = gitOps;
+        this.gitea = gitea;
+        this.remote = remote;
     }
 
     // ===== Record API =====
@@ -112,10 +109,11 @@ public class ReleaseService {
     // ===== Percorsi =====
 
     private Path releasesRoot(Path ws) {
-        return ws.resolve(RELEASE_DIR);
+        return ws.resolve(WorkspaceService.RELEASE_DIR);
     }
 
     private Path docDir(Path ws, String document) {
+        WorkspacePaths.validateRelPath(document); // B5: il document arriva da parametri di request
         return releasesRoot(ws).resolve(document);
     }
 
@@ -143,26 +141,32 @@ public class ReleaseService {
             String rel = pending.poll();
             if (!closure.add(rel)) continue;
             String content = overlay.containsKey(rel) ? overlay.get(rel)
-                    : readQuiet(workspaceService.snapshotRoot(ws).resolve(rel));
+                    : WorkspacePaths.readTextOrNull(workspaceService.snapshotRoot(ws), rel);
             if (content == null) continue; // file referenziato ma assente: si pubblica senza
 
             // frammenti th:replace / th:insert / th:include: ~{percorso :: frammento}
+            // guardia S1: un riferimento che esce dallo snapshot (../) viene scartato
             Matcher m = INCLUDE_REF.matcher(content);
             while (m.find()) {
                 String ref = m.group(1);
                 if (ref.contains("::")) ref = ref.substring(0, ref.indexOf("::"));
                 ref = stripQuotes(ref.trim());
-                if (!ref.isBlank() && !isExternal(ref)) pending.add(normalizeHtmlRef(ref));
+                String relFrag = ref.isBlank() || WorkspacePaths.isExternal(ref) ? null : normalizeHtmlRef(ref);
+                if (relFrag != null && WorkspacePaths.staysInside(relFrag)) pending.add(relFrag);
             }
 
             Document doc = Jsoup.parse(content);
             for (Element link : doc.select("link[rel~=stylesheet]")) {
                 String href = stripQuotes(link.attr("href").trim());
-                if (!href.isBlank() && !isExternal(href)) closure.add(normalizeRel(href));
+                if (href.isBlank() || WorkspacePaths.isExternal(href)) continue;
+                String relCss = WorkspacePaths.normalizeRel(href);
+                if (WorkspacePaths.staysInside(relCss)) closure.add(relCss);
             }
             for (Element img : doc.select("img[src]")) {
                 String s = stripQuotes(img.attr("src").trim());
-                if (!s.isBlank() && !isExternal(s)) closure.add(normalizeRel(s));
+                if (s.isBlank() || WorkspacePaths.isExternal(s)) continue;
+                String relImg = WorkspacePaths.normalizeRel(s);
+                if (WorkspacePaths.staysInside(relImg)) closure.add(relImg);
             }
         }
         // JSON accoppiato (contratto dati del documento)
@@ -179,23 +183,11 @@ public class ReleaseService {
         return r;
     }
 
-    private static String normalizeRel(String href) {
-        String r = stripQuotes(href.replace('\\', '/').trim());
-        while (r.startsWith("/") || r.startsWith("./")) {
-            r = r.startsWith("/") ? r.substring(1) : r.substring(2);
-        }
-        return r;
-    }
-
     private static String stripQuotes(String s) {
         if (s.length() >= 2 && ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith("\"") && s.endsWith("\"")))) {
             return s.substring(1, s.length() - 1).trim();
         }
         return s;
-    }
-
-    private static boolean isExternal(String url) {
-        return url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:") || url.startsWith("//");
     }
 
     // ===== Bozza (commit nel repo del workspace) =====
@@ -217,7 +209,7 @@ public class ReleaseService {
             }
         }
         String msg = "bozza " + templateRel + (note != null && !note.isBlank() ? " — " + note : "");
-        return commitPaths(ws, List.of(WorkspaceService.SNAPSHOT_DIR), msg, author);
+        return gitOps.commitPaths(ws, List.of(WorkspaceService.SNAPSHOT_DIR), msg, author);
     }
 
     // ===== Pubblicazione (candidate) =====
@@ -234,13 +226,29 @@ public class ReleaseService {
     public PublishResult publish(Path ws, String templateRel, Map<String, String> dirtyFiles, String note, String author) throws IOException {
         String document = documentOf(templateRel);
 
+        // B1: precondizioni PRIMA di ogni scrittura — una publish fallita non deve
+        // lasciare candidate orfane su disco né in index.json
+        if (remoteEnabled()) {
+            String openPull = gitea.findOpenPullForDocument(document);
+            if (openPull != null) {
+                throw new IOException("Esiste già una candidata in attesa di review per " + document
+                        + " (" + openPull + "). Attendere il merge o chiuderla prima di ripubblicare.");
+            }
+        }
+
         // repo unico alla root del workspace + main allineata al remote (se configurato)
-        ensureRepo(ws, author);
+        gitOps.ensureRepo(ws, author);
         if (remoteEnabled()) syncFromRemote(ws);
 
         Map<String, String> ov = dirtyFiles != null ? dirtyFiles : Map.of();
         Set<String> closure = resolveClosure(ws, templateRel, ov);
         Path snapshot = workspaceService.snapshotRoot(ws);
+
+        Path docDir = docDir(ws, document);
+        Path indexFile = docDir.resolve("index.json");
+        String indexBefore = Files.exists(indexFile) ? Files.readString(indexFile) : null;
+        Path vDir = null;
+        try {
 
         // i file dirty della chiusura vengono salvati su disco (la pubblicazione li rende persistenti)
         for (String rel : closure) {
@@ -252,10 +260,9 @@ public class ReleaseService {
             }
         }
 
-        Path docDir = docDir(ws, document);
         ObjectNode index = readIndex(docDir, document);
         int version = nextVersion(index);
-        Path vDir = docDir.resolve("v" + version);
+        vDir = docDir.resolve("v" + version);
         Path vFiles = vDir.resolve("files");
         Files.createDirectories(vFiles);
 
@@ -278,7 +285,7 @@ public class ReleaseService {
             }
             ObjectNode f = filesArr.addObject();
             f.put("path", rel);
-            f.put("sha256", sha256(bytes));
+            f.put("sha256", WorkspacePaths.sha256Hex(bytes));
         }
 
         ObjectNode manifest = om.createObjectNode();
@@ -293,7 +300,7 @@ public class ReleaseService {
         // index: nuova candidate
         ObjectNode vi = ((ArrayNode) index.withArray("/versions")).addObject();
         vi.put("version", version);
-        vi.put("status", "candidate");
+        vi.put("status", ReleaseStatus.CANDIDATE.value());
         vi.put("createdBy", author);
         vi.put("createdAt", LocalDateTime.now().toString());
         if (note != null && !note.isBlank()) vi.put("note", note);
@@ -302,140 +309,25 @@ public class ReleaseService {
         String branch = "candidate/" + document + "/v" + version;
         String prUrl = null;
         if (remoteEnabled()) {
-            // una sola candidata aperta per documento: evita conflitti di merge su index.json
-            String open = findOpenPullForDocument(document);
-            if (open != null) {
-                throw new IOException("Esiste già una candidata in attesa di review per " + document
-                        + " (" + open + "). Attendere il merge o chiuderla prima di ripubblicare.");
-            }
             // flusso approvato: candidate su BRANCH dedicato + push + Pull Request.
             // Il merge della PR sul main del remote promuove la versione a "pubblicata";
             // l'API di produzione la scopre con la sincronizzazione periodica.
-            pushCandidateBranch(ws, branch, "publish " + document + " v" + version, author);
-            if (prAuto) {
-                prUrl = createPullRequest(document, version, branch, note, author);
+            gitOps.pushCandidateBranch(ws, branch, "publish " + document + " v" + version, author);
+            if (remote.prAuto()) {
+                prUrl = gitea.createPullRequest(document, version, branch, note, author);
             }
         } else {
             // fallback locale (nessun remote): commit su main + approvazione in-app
-            commitPaths(ws, List.of(RELEASE_DIR), "publish " + document + " v" + version
+            gitOps.commitPaths(ws, List.of(WorkspaceService.RELEASE_DIR), "publish " + document + " v" + version
                     + (note != null && !note.isBlank() ? " — " + note : ""), author);
         }
         return new PublishResult(version, branch, prUrl);
-    }
-
-    /**
-     * Candidate su branch dedicato nel repo unico: viene committata SOLA la directory release/,
-     * così la PR sul remote contiene esattamente la pubblicazione. Prima del push viene spinta
-     * anche main (mirror completo): il branch candidate nasce da main, quindi resta merge-abile.
-     */
-    private void pushCandidateBranch(Path ws, String branch, String message, String author) throws IOException {
-        CredentialsProvider cp = new UsernamePasswordCredentialsProvider(remoteUser, remotePassword);
-        try (Git git = Git.open(ws.toFile())) {
-            ensureOrigin(git);
-            pushMainIfPossible(git, cp);
-            git.checkout().setCreateBranch(true).setName(branch).call();
-            git.add().addFilepattern(RELEASE_DIR + "/").call();
-            git.add().addFilepattern(RELEASE_DIR + "/").setUpdate(true).call();
-            PersonIdent ident = new PersonIdent(author, author.replaceAll("[^a-zA-Z0-9]", "") + "@pdforNotPdf.local");
-            git.commit().setMessage(message).setAuthor(ident).setCommitter(ident).call();
-            var results = git.push().setRemote("origin")
-                    .setRefSpecs(new RefSpec(branch + ":" + branch))
-                    .setCredentialsProvider(cp).call();
-            for (var result : results) {
-                for (RemoteRefUpdate u : result.getRemoteUpdates()) {
-                    if (u.getStatus() != RemoteRefUpdate.Status.OK
-                            && u.getStatus() != RemoteRefUpdate.Status.UP_TO_DATE) {
-                        throw new IOException("Push fallito (" + u.getStatus() + "): "
-                                + (u.getMessage() != null ? u.getMessage() : ""));
-                    }
-                }
-            }
-            git.checkout().setName("main").call(); // il working tree torna allo stato di main
-        } catch (IOException e) {
-            throw e;
         } catch (Exception e) {
-            throw new IOException("Push candidate fallito: " + e.getMessage(), e);
+            // B1 (D2=A): rollback SOLO degli artefatti release — i dirty salvati restano
+            rollbackReleaseArtifacts(docDir, vDir, indexBefore);
+            if (e instanceof IOException io) throw io;
+            throw new IOException(e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName(), e);
         }
-    }
-
-    /** Push best-effort di main: se il remote rifiuta (divergenza), lo gestisce la sincronizzazione. */
-    private void pushMainIfPossible(Git git, CredentialsProvider cp) {
-        try {
-            var results = git.push().setRemote("origin").setRefSpecs(new RefSpec("main:main"))
-                    .setCredentialsProvider(cp).call();
-            for (var result : results) {
-                for (RemoteRefUpdate u : result.getRemoteUpdates()) {
-                    System.err.println("[release-sync] push main: " + u.getStatus());
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("[release-sync] push main non riuscito: " + e.getMessage());
-        }
-    }
-
-    private void ensureOrigin(Git git) throws IOException {
-        try {
-            boolean has = git.remoteList().call().stream().anyMatch(r -> "origin".equals(r.getName()));
-            if (!has) {
-                git.remoteAdd().setName("origin").setUri(new org.eclipse.jgit.transport.URIish(remoteUrl)).call();
-            }
-        } catch (Exception e) {
-            throw new IOException("Configurazione remote fallita: " + e.getMessage(), e);
-        }
-    }
-
-    private String createPullRequest(String document, int version, String branch, String note, String author) throws IOException {
-        String ownerRepo = remoteUrl.replaceFirst("\\.git$", "").replaceFirst("^https?://[^/]+/", "");
-        String owner = ownerRepo.split("/")[0];
-        String repo = ownerRepo.split("/")[1];
-        String title = "Pubblica " + document + " v" + version;
-        Map<String, Object> payload = new java.util.HashMap<>();
-        payload.put("title", title);
-        payload.put("body", (note != null && !note.isBlank() ? note + "\n\n" : "") + "Candidate pubblicata da " + author);
-        payload.put("head", branch);
-        payload.put("base", "main");
-        HttpRequest req = HttpRequest.newBuilder(URI.create(remoteApi + "/repos/" + owner + "/" + repo + "/pulls"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", basicAuth(remoteUser, remotePassword))
-                .POST(HttpRequest.BodyPublishers.ofString(om.writeValueAsString(payload)))
-                .build();
-        try {
-            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
-                return om.readTree(resp.body()).path("html_url").asText(null);
-            }
-            if (resp.statusCode() == 409) return null; // PR già esistente per il branch
-            throw new IOException("Creazione PR fallita (" + resp.statusCode() + "): " + resp.body());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Creazione PR interrotta");
-        }
-    }
-
-    /** Restituisce l'URL della PR aperta per il documento, se esiste. */
-    private String findOpenPullForDocument(String document) throws IOException {
-        String ownerRepo = remoteUrl.replaceFirst("\\.git$", "").replaceFirst("^https?://[^/]+/", "");
-        String prefix = "candidate/" + document + "/";
-        HttpRequest req = HttpRequest.newBuilder(URI.create(remoteApi + "/repos/"
-                + ownerRepo.replace('/', '/') + "/pulls?state=open"))
-                .header("Authorization", basicAuth(remoteUser, remotePassword))
-                .GET().build();
-        try {
-            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) return null;
-            for (JsonNode p : om.readTree(resp.body())) {
-                String headRef = p.path("head").path("ref").asText();
-                if (headRef.startsWith(prefix)) return p.path("html_url").asText(null);
-            }
-            return null;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return null;
-        }
-    }
-
-    private static String basicAuth(String user, String password) {
-        return "Basic " + Base64.getEncoder().encodeToString((user + ":" + password).getBytes(StandardCharsets.UTF_8));
     }
 
     /**
@@ -446,10 +338,10 @@ public class ReleaseService {
      */
     public String syncFromRemote(Path ws) throws IOException {
         if (!remoteEnabled()) return "Remote non configurato: niente da sincronizzare";
-        ensureRepo(ws, "workbench");
-        CredentialsProvider cp = new UsernamePasswordCredentialsProvider(remoteUser, remotePassword);
+        gitOps.ensureRepo(ws, "workbench");
+        CredentialsProvider cp = gitOps.credentials();
         try (Git git = Git.open(ws.toFile())) {
-            ensureOrigin(git);
+            gitOps.ensureOrigin(git);
             git.fetch().setRemote("origin").setCredentialsProvider(cp).call();
             boolean hasMain = git.branchList().call().stream().anyMatch(b -> "refs/heads/main".equals(b.getName()));
             if (!hasMain) {
@@ -460,14 +352,14 @@ public class ReleaseService {
                 git.checkout().setName("main").call();
                 // allinea il remote dentro main (mai riscritture)
                 var originMain = git.getRepository().resolve("origin/main");
-                if (originMain != null) alignWithRemote(git, originMain);
+                if (originMain != null) gitOps.alignWithRemote(git, originMain);
             }
 
             // normalizza: le versioni arrivate su main via PR merge sono "pubblicate"
             boolean changed = normalizePublishedStatuses(releasesRoot(ws));
             if (changed) {
-                git.add().addFilepattern(RELEASE_DIR + "/").call();
-                git.add().addFilepattern(RELEASE_DIR + "/").setUpdate(true).call();
+                git.add().addFilepattern(WorkspaceService.RELEASE_DIR + "/").call();
+                git.add().addFilepattern(WorkspaceService.RELEASE_DIR + "/").setUpdate(true).call();
                 git.commit().setMessage("sync: versioni merge marcate come pubblicate")
                         .setAuthor(new PersonIdent("workbench", "workbench@pdforNotPdf.local"))
                         .setCommitter(new PersonIdent("workbench", "workbench@pdforNotPdf.local")).call();
@@ -475,11 +367,29 @@ public class ReleaseService {
             // mirror: main locale → remote
             git.push().setRemote("origin").setRefSpecs(new RefSpec("main:main"))
                     .setCredentialsProvider(cp).call();
-            return "Sincronizzato con " + remoteUrl;
+            return "Sincronizzato con " + remote.url();
         } catch (IOException e) {
             throw e;
         } catch (Exception e) {
             throw new IOException("Sync fallita: " + e.getMessage(), e);
+        }
+    }
+
+    /** B1: annulla gli artefatti release di una publish fallita (v<n>/ e index.json). */
+    private void rollbackReleaseArtifacts(Path docDir, Path vDir, String indexBefore) {
+        try {
+            if (vDir != null && Files.exists(vDir)) {
+                try (Stream<Path> walk = Files.walk(vDir)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(q -> {
+                        try { Files.delete(q); } catch (IOException ignored) { }
+                    });
+                }
+            }
+            Path indexFile = docDir.resolve("index.json");
+            if (indexBefore != null) Files.writeString(indexFile, indexBefore);
+            else Files.deleteIfExists(indexFile);
+        } catch (IOException e) {
+            log.error("Rollback publish non riuscito: {}", e.getMessage());
         }
     }
 
@@ -492,8 +402,8 @@ public class ReleaseService {
                 JsonNode node = om.readTree(Files.readString(idx));
                 boolean mod = false;
                 for (JsonNode v : node.withArray("/versions")) {
-                    if ("candidate".equals(v.path("status").asText())) {
-                        ((com.fasterxml.jackson.databind.node.ObjectNode) v).put("status", "published");
+                    if (ReleaseStatus.CANDIDATE.value().equals(v.path("status").asText())) {
+                        ((com.fasterxml.jackson.databind.node.ObjectNode) v).put("status", ReleaseStatus.PUBLISHED.value());
                         mod = true;
                     }
                 }
@@ -502,6 +412,8 @@ public class ReleaseService {
                     changed = true;
                 }
             }
+        } catch (UncheckedIOException e) {
+            log.warn("Normalizzazione stati parziale (sotto-cartella illeggibile in {}): {}", root, e.getMessage());
         }
         return changed;
     }
@@ -512,7 +424,7 @@ public class ReleaseService {
         try {
             syncFromRemote(lastWorkspaceDir);
         } catch (Exception e) {
-            System.err.println("[release-sync] " + e.getMessage());
+            log.warn("[release-sync] sincronizzazione programmata non riuscita: {}", e.getMessage());
         }
     }
 
@@ -536,79 +448,6 @@ public class ReleaseService {
         return result;
     }
 
-    /**
-     * Garantisce il repo git unico alla root del workspace e condivide la storia col remote.
-     * - repo assente + remote con main → adotta origin/main come base, poi committa lo stato locale
-     * - repo assente senza remote → init + commit dello stato corrente
-     * - repo presente → allineamento con origin/main (ff o merge; conflitti segnalati)
-     */
-    private void ensureRepo(Path ws, String author) throws IOException {
-        boolean existing = Files.exists(ws.resolve(".git"));
-        Git git = null;
-        try {
-            git = existing ? Git.open(ws.toFile())
-                    : Git.init().setDirectory(ws.toFile()).setInitialBranch("main").call();
-            boolean hasSnapshot = Files.isDirectory(workspaceService.snapshotRoot(ws));
-            String name = (author == null || author.isBlank()) ? "workbench" : author;
-            PersonIdent ident = new PersonIdent(name, name.replaceAll("[^a-zA-Z0-9]", "") + "@pdforNotPdf.local");
-
-            org.eclipse.jgit.lib.ObjectId originMain = null;
-            if (remoteEnabled()) {
-                ensureOrigin(git);
-                CredentialsProvider cp = new UsernamePasswordCredentialsProvider(remoteUser, remotePassword);
-                git.fetch().setRemote("origin").setCredentialsProvider(cp).call();
-                originMain = git.getRepository().resolve("origin/main");
-            }
-            boolean hasMain = git.branchList().call().stream().anyMatch(b -> "refs/heads/main".equals(b.getName()));
-
-            if (!hasMain && originMain != null) {
-                // adotta la storia del remote come base, poi sovrappone lo stato locale
-                git.checkout().setName("main").setCreateBranch(true).setStartPoint("origin/main").call();
-                if (hasSnapshot) {
-                    git.add().addFilepattern(".").call();
-                    if (git.status().call().hasUncommittedChanges()) {
-                        git.commit().setMessage("init workspace").setAuthor(ident).setCommitter(ident).call();
-                    }
-                }
-            } else if (!hasMain) {
-                if (hasSnapshot) {
-                    git.add().addFilepattern(".").call();
-                    git.commit().setMessage("init workspace").setAuthor(ident).setCommitter(ident).call();
-                }
-            } else {
-                git.checkout().setName("main").call();
-                if (originMain != null) alignWithRemote(git, originMain);
-            }
-        } catch (IOException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new IOException("Init repo workspace fallito: " + e.getMessage(), e);
-        } finally {
-            if (git != null) git.close();
-        }
-    }
-
-    /**
-     * Allinea main locale con origin/main: nessuna azione se locale è avanti, fast-forward se
-     * solo indietro, merge commit se divergenti (caso S1: bozze locali + PR mergiate). Mai reset.
-     */
-    private void alignWithRemote(Git git, org.eclipse.jgit.lib.ObjectId originMain) throws Exception {
-        try (var walk = new org.eclipse.jgit.revwalk.RevWalk(git.getRepository())) {
-            var local = walk.parseCommit(git.getRepository().resolve("refs/heads/main"));
-            var remote = walk.parseCommit(originMain);
-            if (walk.isMergedInto(remote, local)) return; // locale è avanti (o uguale)
-        }
-        var result = git.merge().include(originMain).call();
-        var st = result.getMergeStatus();
-        if (st != MergeResult.MergeStatus.FAST_FORWARD
-                && st != MergeResult.MergeStatus.ALREADY_UP_TO_DATE
-                && st != MergeResult.MergeStatus.MERGED) {
-            throw new IOException("Allineamento con origin/main non riuscito (stato: " + st
-                    + "): risolvere a mano. Le bozze locali non sono state toccate.");
-        }
-    }
-
-
     // ===== Approvazione / scarto / rollback =====
 
     /** Approva una candidate (o ri-approva una versione esistente), con eventuale data di efficacia. */
@@ -619,16 +458,16 @@ public class ReleaseService {
         ObjectNode index = readIndex(docDir(ws, document), document);
         ObjectNode vi = findVersion(index, version);
         if (vi == null) throw new IOException("Versione inesistente: v" + version);
-        if ("rejected".equals(vi.path("status").asText())) throw new IOException("Impossibile approvare una versione scartata");
+        if (ReleaseStatus.REJECTED.matches(vi.path("status").asText())) throw new IOException("Impossibile approvare una versione scartata");
 
-        vi.put("status", "approved");
+        vi.put("status", ReleaseStatus.APPROVED.value());
         vi.put("approvedBy", approver);
         vi.put("approvedAt", LocalDateTime.now().toString());
         if (effectiveFrom != null && !effectiveFrom.isBlank()) vi.put("effectiveFrom", effectiveFrom);
 
         index.put("active", resolveActiveVersion(index));
         writeIndex(docDir(ws, document), index);
-        commitPaths(ws, List.of(RELEASE_DIR), "approve " + document + " v" + version
+        gitOps.commitPaths(ws, List.of(WorkspaceService.RELEASE_DIR), "approve " + document + " v" + version
                 + (effectiveFrom != null && !effectiveFrom.isBlank() ? " (efficacia " + effectiveFrom + ")" : ""), approver);
     }
 
@@ -636,13 +475,13 @@ public class ReleaseService {
         ObjectNode index = readIndex(docDir(ws, document), document);
         ObjectNode vi = findVersion(index, version);
         if (vi == null) throw new IOException("Versione inesistente: v" + version);
-        if ("approved".equals(vi.path("status").asText()) && index.path("active").asInt() == version) {
+        if (ReleaseStatus.APPROVED.matches(vi.path("status").asText()) && index.path("active").asInt() == version) {
             throw new IOException("Impossibile scartare la versione attiva: esegui prima un rollback");
         }
-        vi.put("status", "rejected");
+        vi.put("status", ReleaseStatus.REJECTED.value());
         if (reason != null && !reason.isBlank()) vi.put("note", vi.path("note").asText("") + " — scartata: " + reason);
         writeIndex(docDir(ws, document), index);
-        commitPaths(ws, List.of(RELEASE_DIR), "reject " + document + " v" + version, "workbench");
+        gitOps.commitPaths(ws, List.of(WorkspaceService.RELEASE_DIR), "reject " + document + " v" + version, "workbench");
     }
 
     /** Riattiva una versione approvata precedente. */
@@ -651,23 +490,22 @@ public class ReleaseService {
         ObjectNode vi = findVersion(index, version);
         if (vi == null) throw new IOException("Versione inesistente: v" + version);
         String st = vi.path("status").asText();
-        if (!"approved".equals(st) && !"published".equals(st))
+        if (!ReleaseStatus.APPROVED.matches(st) && !ReleaseStatus.PUBLISHED.matches(st))
             throw new IOException("Solo versioni approvate o pubblicate possono essere riattivate");
         // le versioni successive alla target vengono escluse dalla risoluzione (superseded)
         for (JsonNode v : index.withArray("/versions")) {
             if (v.path("version").asInt() > version
-                    && ("approved".equals(v.path("status").asText()) || "published".equals(v.path("status").asText()))) {
+                    && (ReleaseStatus.APPROVED.matches(v.path("status").asText()) || ReleaseStatus.PUBLISHED.matches(v.path("status").asText()))) {
                 ((com.fasterxml.jackson.databind.node.ObjectNode) v).put("superseded", true);
             }
         }
         index.put("active", version);
         writeIndex(docDir(ws, document), index);
-        commitPaths(ws, List.of(RELEASE_DIR), "rollback " + document + " → v" + version, author);
+        gitOps.commitPaths(ws, List.of(WorkspaceService.RELEASE_DIR), "rollback " + document + " → v" + version, author);
         if (remoteEnabled()) {
             try (Git git = Git.open(ws.toFile())) {
-                CredentialsProvider cp = new UsernamePasswordCredentialsProvider(remoteUser, remotePassword);
                 git.push().setRemote("origin").setRefSpecs(new RefSpec("main:main"))
-                        .setCredentialsProvider(cp).call();
+                        .setCredentialsProvider(gitOps.credentials()).call();
             } catch (Exception e) {
                 throw new IOException("Push rollback fallito: " + e.getMessage(), e);
             }
@@ -719,7 +557,7 @@ public class ReleaseService {
                 JsonNode mf = om.readTree(Files.readString(manifest));
                 for (JsonNode f : mf.withArray("/files")) {
                     if (fileRel.equals(f.path("path").asText())) {
-                        result.add(new ImpactEntry(document, active, "approved"));
+                        result.add(new ImpactEntry(document, active, ReleaseStatus.APPROVED.value()));
                         break;
                     }
                 }
@@ -767,6 +605,8 @@ public class ReleaseService {
                                 files.add(new ReleaseFileEntry(document + "/v" + ver + "/files/" + rel,
                                         !rel.equals(owner) && !rel.startsWith(owner + "/")));
                             }
+                        } catch (UncheckedIOException e) {
+                            log.warn("File della versione v{} di {} non esplorabili: {}", ver, document, e.getMessage());
                         }
                     }
                     versions.add(new ReleaseVersionNode(ver, v.path("status").asText(), ver == active,
@@ -774,6 +614,8 @@ public class ReleaseService {
                 }
                 result.add(new ReleaseDocumentNode(document, active, versions));
             }
+        } catch (UncheckedIOException e) {
+            log.warn("Albero release parziale (sotto-cartella illeggibile in {}): {}", root, e.getMessage());
         }
         result.sort(java.util.Comparator.comparing(ReleaseDocumentNode::document));
         return result;
@@ -788,10 +630,7 @@ public class ReleaseService {
         if (p.startsWith("/") || !p.matches("^.*/v[0-9]+/files/.+$")) {
             throw new IllegalArgumentException("Percorso release non valido: " + relPath);
         }
-        Path target = releasesRoot(ws).resolve(p).normalize();
-        if (!target.startsWith(releasesRoot(ws).toAbsolutePath().normalize())) {
-            throw new IllegalArgumentException("Percorso fuori dal workspace: " + relPath);
-        }
+        Path target = WorkspacePaths.resolveInside(releasesRoot(ws), p);
         if (!Files.isRegularFile(target)) throw new IOException("File non trovato: " + relPath);
         String k = WorkspaceService.kindOf(target.getFileName().toString());
         if (!("html".equals(k) || "css".equals(k) || "json".equals(k))) {
@@ -806,10 +645,7 @@ public class ReleaseService {
         if (p.startsWith("/") || !p.matches("^.*/v[0-9]+/files/.+$")) {
             throw new IllegalArgumentException("Percorso release non valido: " + relPath);
         }
-        Path target = releasesRoot(ws).resolve(p).normalize();
-        if (!target.startsWith(releasesRoot(ws).toAbsolutePath().normalize())) {
-            throw new IllegalArgumentException("Percorso fuori dal workspace: " + relPath);
-        }
+        Path target = WorkspacePaths.resolveInside(releasesRoot(ws), p);
         if (!Files.isRegularFile(target)) throw new IOException("File non trovato: " + relPath);
         if (!"img".equals(WorkspaceService.kindOf(target.getFileName().toString()))) {
             throw new IOException("Non è un'immagine: " + relPath);
@@ -861,9 +697,9 @@ public class ReleaseService {
         LocalDate bestEf = null;
         int maxApproved = -1;
         for (JsonNode v : index.withArray("/versions")) {
-            // servibili: "published" (arrivate via PR merge) e "approved" (approvata in-app)
+            // servibili: published (arrivate via PR merge) e approved (approvata in-app)
             String st = v.path("status").asText();
-            if (!"approved".equals(st) && !"published".equals(st)) continue;
+            if (!ReleaseStatus.APPROVED.matches(st) && !ReleaseStatus.PUBLISHED.matches(st)) continue;
             if (v.path("superseded").asBoolean(false)) continue; // escluse da un rollback
             int ver = v.path("version").asInt();
             maxApproved = Math.max(maxApproved, ver);
@@ -884,58 +720,6 @@ public class ReleaseService {
         return best != -1 ? best : maxApproved;
     }
 
-    // ===== Git (repo unico alla root del workspace) =====
-
-    /**
-     * Committa nel repo del workspace solo i percorsi indicati (es. "snapshot", "release"):
-     * le bozze e le pubblicazioni hanno history intrecciata ma staging separato.
-     * Repo creato al primo uso. Se non ci sono cambiamenti, non committa (ritorna null).
-     */
-    private String commitPaths(Path ws, List<String> pathPatterns, String message, String author) throws IOException {
-        boolean existing = Files.exists(ws.resolve(".git"));
-        Git git = null;
-        try {
-            git = existing ? Git.open(ws.toFile())
-                    : Git.init().setDirectory(ws.toFile()).setInitialBranch("main").call();
-            String name = (author == null || author.isBlank()) ? "workbench" : author;
-            PersonIdent ident = new PersonIdent(name, name.replaceAll("[^a-zA-Z0-9]", "") + "@pdforNotPdf.local");
-            var before = git.status().call();
-            if (!before.hasUncommittedChanges() && before.getUntracked().isEmpty()) return null;
-            for (String p : pathPatterns) {
-                String pattern = p.endsWith("/") ? p : p + "/";
-                git.add().addFilepattern(pattern).call();
-                git.add().addFilepattern(pattern).setUpdate(true).call();
-            }
-            // committa solo se i percorsi indicati hanno davvero modifiche in stage
-            if (!git.status().call().hasUncommittedChanges()) return null;
-            RevCommit rc = git.commit().setMessage(message).setAuthor(ident).setCommitter(ident).call();
-            return rc.getId().getName();
-        } catch (Exception e) {
-            throw new IOException("Commit fallito: " + e.getMessage(), e);
-        } finally {
-            git.close();
-        }
-    }
-
     // ===== Utility =====
 
-    private String readQuiet(Path path) {
-        try {
-            return Files.readString(path);
-        } catch (IOException e) {
-            return null;
-        }
-    }
-
-    private static String sha256(byte[] data) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] hash = md.digest(data);
-            StringBuilder sb = new StringBuilder();
-            for (byte b : hash) sb.append(String.format("%02x", b));
-            return sb.toString();
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
-    }
 }
