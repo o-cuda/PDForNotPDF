@@ -76,7 +76,9 @@ mvn spring-boot:run
 
 L'app parte sulla porta **8080**.
 
-> Se modifichi `frontend/editor-main.js` (il bundle CodeMirror), rigeneralo: `npm install` poi `node frontend/build.js`.
+> Se modifichi `frontend/editor-main.js` (bundle CodeMirror) o `frontend/workbench-main.js`
+> (logica del workbench), rigenera i bundle: `npm install` poi `node frontend/build.js`.
+> NB: dopo il rebuild va **riavviata l'app** (`spring-boot:run` copia le risorse solo all'avvio).
 
 ### Provala nel browser
 
@@ -117,9 +119,11 @@ L'anteprima (solo via popout) usa **Paged.js** per impaginare il documento in pa
 ```
 PDForNotPDF/
 ├── ARCHITECTURE.md                 # Documentazione architetturale
-├── frontend/                       # Sorgente bundle CodeMirror 6
-│   ├── editor-main.js              #   entry point (tema, linguaggi, lint)
-│   └── build.js                    #   build esbuild → static/js/editor.js
+├── frontend/                       # Sorgente bundle esbuild
+│   ├── editor-main.js              #   entry point bundle CM6 (tema, linguaggi, lint)
+│   ├── workbench-main.js           #   logica del workbench (estratta da workspace.html)
+│   └── build.js                    #   build esbuild → static/js/{editor,workbench}.js
+├── test-utils.js                   # Helper e2e condivisi (check/rightClick/launch)
 ├── pdfornotpdf/                    # Progetto Spring Boot
 │   ├── pom.xml
 │   └── src/
@@ -132,17 +136,25 @@ PDForNotPDF/
 │       │   │   │   └── LlmController.java         # Assistente AI (BYOK/self-hosted)
 │       │   │   └── service/
 │       │   │       ├── PdfService.java            # Wrapper OpenHTMLtoPDF
-│       │   │       ├── WorkspaceService.java      # Tree, render, overlay, save, file-ops, immagini
-│       │   │       ├── ReleaseService.java        # Ciclo di vita + repo git unico + sync Gitea
+│       │   │       ├── WorkspaceService.java      # Tree resiliente, render (resolver con guardia), save, file-ops, immagini
+│       │   │       ├── WorkspacePaths.java        # UNICA API di guardie/lettura protetta dei percorsi
+│       │   │       ├── ReleaseService.java        # Ciclo di vita release (dominio, publish atomica)
+│       │   │       ├── ReleaseStatus.java         # Enum stati (candidate/approved/published/rejected)
+│       │   │       ├── GitOperations.java         # Plumbing git (repo unico, commit, branch candidate, allineamento)
+│       │   │       ├── RemoteConfig.java          # Config remote Gitea (un solo bean)
+│       │   │       ├── GiteaClient.java           # Interfaccia forge (flusso PR testabile con fake)
+│       │   │       ├── HttpGiteaClient.java       # Implementazione HTTP PR create/find
 │       │   │       ├── DocxImportService.java     # Import DOCX (scaffold + header/footer Word)
-│       │   │       └── LlmService.java            # Client LLM OpenAI-compatibile/Ollama
+│       │   │       └── LlmService.java            # Client LLM OpenAI-compatibile/Ollama (solo http/https)
+│       │   │   └── web/                          # Eccezioni tipizzate + GlobalExceptionHandler (R2)
 │       │   ├── resources/
 │       │   │   ├── static/js/editor.js            # Bundle CM6 precompilato (committato)
+│       │   │   ├── static/js/workbench.js         # Bundle workbench precompilato (committato)
 │       │   │   └── templates/
 │       │   │       ├── loader.html                # Selezione workspace
-│       │   │       ├── workspace.html             # Workbench (doppio explorer + tab + popout)
+│       │   │       ├── workspace.html             # Workbench (markup+CSS; JS in workbench.js)
 │       │   │       └── fragments/preview.html     # Fragment anteprima
-│       └── test/java/.../                         # 69 test (controller + service)
+│       └── test/java/.../                         # 106 test (controller + service)
 ├── docker/
 │   └── gitea/                      # Gitea locale: approvazioni via PR (setup idempotente)
 ├── tools/
@@ -150,34 +162,32 @@ PDForNotPDF/
 │   └── migrate-workspace.py        # Migrazione dal formato precedente (snapshot/ + release/)
 ├── test-explorer.js                # E2E: explorer, tab, popout, viewer immagini (22)
 ├── test-phase234.js                # E2E: CM6, save, overlay (21)
-├── test-fileops.js                 # E2E: nuovo file/cartella, rinomina, delete con blocco, upload/replace immagini (22)
-├── test-lifecycle.js               # E2E: bozza→candidata→PR→approvata→rollback (Gitea)
-├── test-workspace/                 # Workspace di esempio
-│   ├── fattura.html                # Template Thymeleaf di test (include header/footer)
-│   ├── fattura.css                 # CSS di test
-│   ├── fattura.json                # Dati mock di test
-│   └── includes/
-│       ├── header.html             # Frammento incluso via th:replace
-│       └── footer.html             # Frammento incluso via th:replace
+├── test-fileops.js                 # E2E: file ops, rinomina, delete con blocco (incl. cartella piena), upload/replace (25)
+├── test-lifecycle.js               # E2E: bozza→candidata→PR→approvata→rollback (Gitea) + release read-only (21)
 └── design-process/                 # Documentazione WDS del progetto
-    ├── 00-design-log.md
+    ├── 00-design-log.md            # Stato task + transizioni (Fasi 1–4 + audit applicati)
     ├── A-Product-Brief/
     ├── C-UX-Scenarios/
-    └── D-Design-System/
+    ├── D-Design-System/
+    └── E-Proposte/                 # Proposte e audit (03 sicurezza, 04 refactoring — applicati)
 ```
 
 ## Test
 
 ```bash
-# Unit + integration test backend (69)
+# Unit + integration test backend (106, da pdfornotpdf/)
 cd pdfornotpdf && mvn test
 
-# E2E (richiedono l'app avviata su :8080; modificano test-workspace e lo ripristinano)
+# E2E (richiedono l'app avviata su :8080; rigenerano il workspace demo all'avvio;
+# test-lifecycle richiede anche Gitea su :3000 — credenziali da docker/gitea/.credentials)
 node test-explorer.js     # explorer multi-tenant, tab, popout base, viewer immagini (22 check)
 node test-phase234.js     # editor CM6, salvataggio, overlay live multi-file (21 check)
-node test-fileops.js      # file ops complete: create/rename/delete con blocco, upload+replace immagini (22 check)
-node test-lifecycle.js    # ciclo di vita con Gitea + Explorer Release read-only e stampa (20 check)
+node test-fileops.js      # file ops complete: create/rename/delete con blocco, upload+replace immagini (25 check)
+node test-lifecycle.js    # ciclo di vita con Gitea + Explorer Release read-only e stampa (21 check)
 ```
+
+Gli helper e2e condivisi (`check`, `rightClick` robusto, apertura pagina con raccolta errori) sono
+in `test-utils.js`.
 
 ## Ciclo di vita dei template (bozza → candidata → approvata)
 
@@ -259,11 +269,14 @@ Ogni proposta viene mostrata come **diff** e applicata solo su conferma, sul buf
 
 ## REST API
 
-Genera un PDF passando template e dati reali.
+La documentazione interattiva delle API (springdoc) è su **/swagger-ui.html**.
+
+Genera un PDF passando template e dati reali. Precondizione: workspace demo generato con
+`python3 tools/generate-demo-workspace.py ~/workspace/stampe-demo` (idempotente).
 
 ```bash
 curl -X POST \
-  'http://localhost:8080/api/generate?workspace=/home/ocuda/workspace/PDForNotPDF/test-workspace&template=fattura.html&cssFile=fattura.css' \
+  'http://localhost:8080/api/generate?workspace=/home/ocuda/workspace/stampe-demo&template=CLIENTE_A/fattura.html&cssFile=CLIENTE_A/include/fattura.css' \
   -H 'Content-Type: application/json' \
   -d '{
     "titolo": "Fattura #2026-002",
